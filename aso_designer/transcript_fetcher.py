@@ -237,3 +237,84 @@ class EntrezFetcher:
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning("Cache corruption for '%s': %s", identifier, e)
             return None
+
+    # ------------------------------------------------------------------
+    # Gene symbol → RefSeq transcript resolution
+    # ------------------------------------------------------------------
+
+    def resolve_gene_to_transcripts(
+        self,
+        gene_symbol: str,
+        organism: str = "Homo sapiens",
+    ) -> List[str]:
+        """Resolve a gene symbol to RefSeq transcript accession IDs.
+
+        Uses ESearch (nucleotide db) with a gene+organism query to find
+        RefSeq mRNA transcripts (NM_ accessions).
+
+        Parameters
+        ----------
+        gene_symbol : str
+            Gene symbol (e.g. "DMD", "SMN1").
+        organism : str
+            Organism name (default "Homo sapiens").
+
+        Returns
+        -------
+        List[str]
+            List of RefSeq mRNA accession IDs (NM_ or NR_ prefix).
+
+        Raises
+        ------
+        TranscriptFetchError
+            If the search fails or returns no results.
+        """
+        cache_id = f"gene:{gene_symbol}:{organism}"
+        cached = self._load_cache(cache_id)
+        if cached is not None:
+            return [r.accession for r in cached]
+
+        # ESearch for RefSeq transcripts
+        query = f"{gene_symbol}[Gene] AND {organism}[Organism] AND refseq[filter] AND biomol_mRNA[Properties]"
+        result = self._get(
+            "esearch.fcgi",
+            db="nucleotide",
+            term=query,
+            retmax=50,
+            retmode="json",
+            sort="length_desc",  # Longest transcripts first
+        )
+
+        id_list = result.get("esearchresult", {}).get("idlist", [])
+        if not id_list:
+            logger.warning("No RefSeq transcripts found for gene '%s' in %s", gene_symbol, organism)
+            raise TranscriptFetchError(
+                f"No RefSeq transcripts found for gene '{gene_symbol}' in {organism}"
+            )
+
+        # ESummary to get accession IDs from GI numbers
+        summaries = self._get(
+            "esummary.fcgi",
+            db="nucleotide",
+            id=",".join(id_list),
+            retmode="json",
+        )
+
+        accessions: List[str] = []
+        for gi in id_list:
+            entry = summaries.get("result", {}).get(gi, {})
+            acc = entry.get("accessionversion", "")
+            title = entry.get("title", "")
+            # Only keep mRNA transcripts (NM_ prefix)
+            if acc.startswith("NM_"):
+                accessions.append(acc)
+            elif "mRNA" in title and acc.startswith(("NM_", "XM_")):
+                accessions.append(acc)
+
+        if not accessions:
+            raise TranscriptFetchError(
+                f"No mRNA accessions resolved for gene '{gene_symbol}'"
+            )
+
+        logger.info("Resolved gene '%s' to %d transcript(s): %s", gene_symbol, len(accessions), accessions[:5])
+        return accessions
