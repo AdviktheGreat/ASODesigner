@@ -1,0 +1,150 @@
+# ASODesigner default configuration
+# ================================
+# All parameters have inline documentation explaining their purpose.
+# Override any of these by providing your own YAML config file or CLI flags.
+
+# ---------------------------------------------------------------------------
+# Candidate generation
+# ---------------------------------------------------------------------------
+candidate:
+  # Length of the ASO oligonucleotide in nucleotides.
+  # Typical therapeutic ASOs range from 15 to 25 nt.
+  length: 20
+
+  # Step size for sliding window across the transcript (1 = overlap by length-1).
+  step: 1
+
+  # Minimum and maximum GC content (fraction 0.0–1.0).
+  # GC content outside 30–60% is generally suboptimal for ASO binding.
+  gc_min: 0.30
+  gc_max: 0.60
+
+  # Maximum allowed consecutive identical bases (homopolymer run).
+  # Long homopolymers can cause non-specific binding and synthesis issues.
+  homopolymer_max: 4
+
+  # Chemistry type: gapmer, mixmer, 2ome, moe, morpholino
+  chemistry: gapmer
+
+# ---------------------------------------------------------------------------
+# Gapmer-specific settings (only used when chemistry is "gapmer")
+# ---------------------------------------------------------------------------
+gapmer:
+  # Number of DNA nucleotides in the center (RNase H recruitment region).
+  # Typical gap sizes: 8–10 nt for a 20-mer.
+  gap_size: 10
+
+  # Wing length (modified nucleotides on each side of the DNA gap).
+  wing_length: 5
+
+  # Wing chemistry: 2ome (2'-O-methyl), moe (2'-O-methoxyethyl)
+  wing_chemistry: moe
+
+# ---------------------------------------------------------------------------
+# Mixmer-specific settings (only used when chemistry is "mixmer")
+# ---------------------------------------------------------------------------
+mixmer:
+  # Pattern of modifications (list of booleans, True = modified).
+  # Length must match candidate length. Example for 20-mer:
+  #   [true, false, true, false, ...]
+  pattern: []
+
+  # Modification type for marked positions.
+  modification: 2ome
+
+# ---------------------------------------------------------------------------
+# RNA accessibility (ViennaRNA)
+# ---------------------------------------------------------------------------
+accessibility:
+  # RNAplfold sliding window size (nt) for local accessibility.
+  # Larger windows capture longer-range interactions but are slower.
+  window_size: 150
+
+  # Maximum pairing distance (nt). Pairs beyond this are not considered.
+  max_pairing_distance: 100
+
+  # Accessibility score threshold below which a site is "accessible".
+  # Range 0.0 (fully paired) to 1.0 (fully unpaired).
+  accessible_threshold: 0.5
+
+# ---------------------------------------------------------------------------
+# Thermodynamics
+# ---------------------------------------------------------------------------
+thermodynamics:
+  # Melting temperature (Tm) range in degrees Celsius.
+  # Candidates outside this range are filtered out.
+  tm_min: 40.0
+  tm_max: 65.0
+  tm_optimal: 52.0
+
+  # Salt concentration (M) for Tm calculation.
+  na_conc: 0.1
+
+  # Oligo concentration (M) for Tm calculation.
+  oligo_conc: 1.0e-6
+
+  # Maximum allowed self-structure ΔG (kcal/mol).
+  # Candidates with ΔG self below this (more negative) are penalized.
+  self_structure_max: -3.0
+
+  # Minimum net binding ΔG (kcal/mol). More negative = stronger binding.
+  binding_min: -5.0
+
+# ---------------------------------------------------------------------------
+# Off-target analysis
+# ---------------------------------------------------------------------------
+off_target:
+  # Maximum mismatches allowed for off-target hits.
+  max_mismatches: 3
+
+  # Seed region definition (positions relative to ASO 5' end, 0-based).
+  seed_start: 2
+  seed_end: 8
+
+  # Weight applied to seed-region mismatches (higher = more penalizing).
+  seed_mismatch_weight: 2.0
+
+  # Maximum off-target hits allowed before a candidate is filtered.
+  max_hits: 50
+
+# ---------------------------------------------------------------------------
+# Variant / SNP awareness
+# ---------------------------------------------------------------------------
+variant:
+  # Minimum minor allele frequency (MAF) to flag a variant.
+  maf_threshold: 0.01
+
+  # Penalty multiplier for variants in the seed region vs. non-seed.
+  seed_region_multiplier: 3.0
+
+  # Flag candidates overlapping pathogenic ClinVar variants.
+  flag_pathogenic: true
+
+# ---------------------------------------------------------------------------
+# Scoring weights (must sum to 1.0)
+# ---------------------------------------------------------------------------
+# Each weight determines the relative contribution of a sub-score to the
+# final composite score. Adjust based on your prioritization needs.
+# All sub-scores are normalized to 0.0–1.0 before weighting.
+scoring:
+  weights:
+    accessibility: 0.25
+    thermodynamics: 0.20
+    gc_content: 0.10
+    off_target: 0.20
+    variant: 0.10
+    self_structure: 0.10
+    positional: 0.05
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+reporting:
+  # Output directory for reports and data files.
+  output_dir: "results"
+
+  # Generate HTML report in addition to JSON.
+  generate_html: true
+
+  # Include full off-target details in the report (can be large).
+  include_offtarget_details: true

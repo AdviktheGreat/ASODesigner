@@ -1,0 +1,56 @@
+# ASO chemistry-specific parameter presets
+# =========================================
+# Each chemistry has distinct thermodynamic and structural properties.
+# These presets adjust Tm parameters and scoring weights when the
+# corresponding chemistry is selected.
+
+# ---------------------------------------------------------------------------
+# Gapmer: DNA center with modified RNA wings (RNase H recruitment)
+# ---------------------------------------------------------------------------
+gapmer:
+  description: "DNA gap flanked by modified wings; recruits RNase H for target cleavage."
+  # Gapmers typically have higher Tm due to modified wings.
+  tm_adjustment: 0.0
+  # RNase H bonus in scoring (gapmers are the most common therapeutic format).
+  chemistry_bonus: 0.05
+  # Self-structure is less of an issue with DNA center.
+  self_structure_weight_adjust: 0.8
+
+# ---------------------------------------------------------------------------
+# Mixmer: Interspersed modified and unmodified nucleotides
+# ---------------------------------------------------------------------------
+mixmer:
+  description: "Interspersed modifications; can modulate splicing or block translation."
+  tm_adjustment: 2.0
+  chemistry_bonus: 0.02
+  self_structure_weight_adjust: 1.0
+
+# ---------------------------------------------------------------------------
+# 2'-O-methyl (2'OMe): Full-length 2'-O-methyl modified RNA
+# ---------------------------------------------------------------------------
+2ome:
+  description: "Full 2'-O-methyl RNA; increases Tm ~1-2 °C per modification, nuclease resistant."
+  tm_adjustment: 5.0
+  chemistry_bonus: 0.03
+  self_structure_weight_adjust: 1.2
+
+# ---------------------------------------------------------------------------
+# 2'-O-methoxyethyl (MOE): Full-length MOE modified RNA
+# ---------------------------------------------------------------------------
+moe:
+  description: "Full 2'-O-methoxyethyl RNA; increases Tm ~1-2 °C per modification, high affinity."
+  tm_adjustment: 6.0
+  chemistry_bonus: 0.03
+  self_structure_weight_adjust: 1.1
+
+# ---------------------------------------------------------------------------
+# Morpholino: Phosphorodiamidate morpholino oligomers
+# ---------------------------------------------------------------------------
+morpholino:
+  description: "Morpholino oligomers; nuclease resistant, does not recruit RNase H, steric blocking."
+  # Morpholinos have a different Tm scale — lower per-unit but very specific.
+  tm_adjustment: -3.0
+  chemistry_bonus: 0.02
+  self_structure_weight_adjust: 0.9
+  # Morpholinos cannot recruit RNase H — penalize if RNase H is desired.
+  rnase_h_eligible: false
