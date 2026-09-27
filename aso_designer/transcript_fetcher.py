@@ -439,3 +439,78 @@ class EntrezFetcher:
             if org in description:
                 return org
         return "unknown"
+
+    # ------------------------------------------------------------------
+    # Ortholog fetching for conservation analysis
+    # ------------------------------------------------------------------
+
+    def fetch_orthologs(
+        self,
+        gene_symbol: str,
+        organisms: List[str],
+    ) -> dict[str, List[TranscriptRecord]]:
+        """Fetch orthologous transcripts for a gene across multiple organisms.
+
+        Useful for conservation analysis when designing ASOs that should
+        target conserved regions across species.
+
+        Parameters
+        ----------
+        gene_symbol : str
+            Gene symbol (e.g. "DMD").
+        organisms : List[str]
+            List of organism names (e.g. ["Homo sapiens", "Mus musculus"]).
+
+        Returns
+        -------
+        dict[str, List[TranscriptRecord]]
+            Mapping of organism → list of transcript records.
+        """
+        results: dict[str, List[TranscriptRecord]] = {}
+        for organism in organisms:
+            try:
+                accessions = self.resolve_gene_to_transcripts(gene_symbol, organism)
+                # Fetch the longest transcript for each organism
+                records = self.fetch_transcripts(accessions[:3])
+                if records:
+                    # Keep only the longest transcript
+                    longest = max(records, key=lambda r: r.length)
+                    results[organism] = [longest]
+                    logger.info(
+                        "Ortholog for %s in %s: %s (%d nt)",
+                        gene_symbol,
+                        organism,
+                        longest.accession,
+                        longest.length,
+                    )
+                else:
+                    logger.warning("No ortholog found for %s in %s", gene_symbol, organism)
+                    results[organism] = []
+            except TranscriptFetchError as e:
+                logger.warning("Ortholog fetch failed for %s in %s: %s", gene_symbol, organism, e)
+                results[organism] = []
+        return results
+
+    def fetch_gene(
+        self,
+        gene_symbol: str,
+        organism: str = "Homo sapiens",
+    ) -> List[TranscriptRecord]:
+        """High-level method: resolve gene symbol and fetch all transcripts.
+
+        This is the primary entry point for gene-based fetching.
+
+        Parameters
+        ----------
+        gene_symbol : str
+            Gene symbol (e.g. "DMD", "SMN1").
+        organism : str
+            Organism name (default "Homo sapiens").
+
+        Returns
+        -------
+        List[TranscriptRecord]
+            All RefSeq mRNA transcripts for the gene.
+        """
+        accessions = self.resolve_gene_to_transcripts(gene_symbol, organism)
+        return self.fetch_transcripts(accessions)
