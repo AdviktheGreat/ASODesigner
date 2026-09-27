@@ -4,8 +4,6 @@ Inspired by GuideX's Cas13Config but redesigned for ASO-specific parameters
 with nested models, cross-field validation, and detailed field descriptions.
 """
 
-from typing import List, Optional
-
 from pydantic import BaseModel, Field, confloat, conint, model_validator
 
 
@@ -15,9 +13,7 @@ class CandidateConfig(BaseModel):
     length: conint(ge=10, le=30) = Field(
         default=20, description="ASO oligonucleotide length (10–30 nt)."
     )
-    step: conint(ge=1, le=10) = Field(
-        default=1, description="Sliding window step size."
-    )
+    step: conint(ge=1, le=10) = Field(default=1, description="Sliding window step size.")
     gc_min: confloat(ge=0.0, le=1.0) = Field(
         default=0.30, description="Minimum GC content fraction."
     )
@@ -42,9 +38,7 @@ class CandidateConfig(BaseModel):
     def validate_chemistry(self) -> "CandidateConfig":
         valid = {"gapmer", "mixmer", "2ome", "moe", "morpholino"}
         if self.chemistry not in valid:
-            raise ValueError(
-                f"Invalid chemistry '{self.chemistry}'. Must be one of {valid}."
-            )
+            raise ValueError(f"Invalid chemistry '{self.chemistry}'. Must be one of {valid}.")
         return self
 
 
@@ -57,9 +51,7 @@ class GapmerConfig(BaseModel):
     wing_length: conint(ge=2, le=10) = Field(
         default=5, description="Modified wing length on each side."
     )
-    wing_chemistry: str = Field(
-        default="moe", description="Wing modification: 2ome or moe."
-    )
+    wing_chemistry: str = Field(default="moe", description="Wing modification: 2ome or moe.")
 
     @model_validator(mode="after")
     def validate_wing_chemistry(self) -> "GapmerConfig":
@@ -74,13 +66,11 @@ class GapmerConfig(BaseModel):
 class MixmerConfig(BaseModel):
     """Mixmer-specific parameters."""
 
-    pattern: List[bool] = Field(
+    pattern: list[bool] = Field(
         default_factory=list,
         description="Modification pattern (True = modified).",
     )
-    modification: str = Field(
-        default="2ome", description="Modification type for marked positions."
-    )
+    modification: str = Field(default="2ome", description="Modification type for marked positions.")
 
 
 class AccessibilityConfig(BaseModel):
@@ -104,15 +94,9 @@ class ThermodynamicsConfig(BaseModel):
     tm_max: float = Field(default=65.0, ge=20.0, le=100.0)
     tm_optimal: float = Field(default=52.0, ge=20.0, le=100.0)
     na_conc: float = Field(default=0.1, gt=0.0, description="Sodium concentration (M).")
-    oligo_conc: float = Field(
-        default=1.0e-6, gt=0.0, description="Oligo concentration (M)."
-    )
-    self_structure_max: float = Field(
-        default=-3.0, description="Max self-structure ΔG (kcal/mol)."
-    )
-    binding_min: float = Field(
-        default=-5.0, description="Min net binding ΔG (kcal/mol)."
-    )
+    oligo_conc: float = Field(default=1.0e-6, gt=0.0, description="Oligo concentration (M).")
+    self_structure_max: float = Field(default=-3.0, description="Max self-structure ΔG (kcal/mol).")
+    binding_min: float = Field(default=-5.0, description="Min net binding ΔG (kcal/mol).")
 
     @model_validator(mode="after")
     def validate_tm_range(self) -> "ThermodynamicsConfig":
@@ -129,12 +113,8 @@ class OffTargetConfig(BaseModel):
     max_mismatches: conint(ge=0, le=5) = Field(
         default=3, description="Max mismatches for off-target hits."
     )
-    seed_start: conint(ge=0, le=10) = Field(
-        default=2, description="Seed region start (0-based)."
-    )
-    seed_end: conint(ge=1, le=15) = Field(
-        default=8, description="Seed region end (exclusive)."
-    )
+    seed_start: conint(ge=0, le=10) = Field(default=2, description="Seed region start (0-based).")
+    seed_end: conint(ge=1, le=15) = Field(default=8, description="Seed region end (exclusive).")
     seed_mismatch_weight: confloat(ge=0.0, le=10.0) = Field(
         default=2.0, description="Weight for seed-region mismatches."
     )
@@ -186,9 +166,7 @@ class ScoringWeightsConfig(BaseModel):
             + self.positional
         )
         if abs(total - 1.0) > 0.001:
-            raise ValueError(
-                f"Scoring weights must sum to 1.0, got {total:.4f}."
-            )
+            raise ValueError(f"Scoring weights must sum to 1.0, got {total:.4f}.")
         return self
 
 

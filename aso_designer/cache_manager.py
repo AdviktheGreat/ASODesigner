@@ -10,7 +10,6 @@ import hashlib
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 from aso_designer.transcript_fetcher import TranscriptRecord
 from aso_designer.utils.logger import get_logger
@@ -34,7 +33,7 @@ class TranscriptCacheManager:
 
     def __init__(
         self,
-        cache_base: Optional[Union[str, Path]] = None,
+        cache_base: str | Path | None = None,
         default_ttl: int = 168,
     ) -> None:
         self.cache_base = Path(cache_base) if cache_base else _DEFAULT_CACHE_BASE
@@ -57,7 +56,7 @@ class TranscriptCacheManager:
     def store(
         self,
         identifier: str,
-        records: List[TranscriptRecord],
+        records: list[TranscriptRecord],
         organism: str = "unknown",
     ) -> None:
         """Store transcript records in the cache.
@@ -80,8 +79,8 @@ class TranscriptCacheManager:
         self,
         identifier: str,
         organism: str = "unknown",
-        ttl: Optional[timedelta] = None,
-    ) -> Optional[List[TranscriptRecord]]:
+        ttl: timedelta | None = None,
+    ) -> list[TranscriptRecord] | None:
         """Retrieve cached records if they exist and are within TTL.
 
         Parameters
@@ -135,7 +134,7 @@ class TranscriptCacheManager:
     # Inspection and management utilities
     # ------------------------------------------------------------------
 
-    def inspect(self) -> Dict[str, dict]:
+    def inspect(self) -> dict[str, dict]:
         """Inspect the cache and return a summary per organism.
 
         Returns
@@ -143,7 +142,7 @@ class TranscriptCacheManager:
         dict
             Mapping of organism → {files, total_size_bytes, oldest_entry, newest_entry}.
         """
-        report: Dict[str, dict] = {}
+        report: dict[str, dict] = {}
         for org_dir in sorted(self.cache_base.iterdir()):
             if not org_dir.is_dir():
                 continue

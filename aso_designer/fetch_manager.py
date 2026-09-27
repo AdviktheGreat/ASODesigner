@@ -10,7 +10,6 @@ Each step is logged so the user can trace which source was used.
 """
 
 from pathlib import Path
-from typing import List, Optional, Union
 
 from aso_designer.cache_manager import TranscriptCacheManager
 from aso_designer.local_loader import load_fasta
@@ -40,15 +39,15 @@ class FetchManager:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        email: Optional[str] = None,
-        cache_dir: Optional[Union[str, Path]] = None,
+        api_key: str | None = None,
+        email: str | None = None,
+        cache_dir: str | Path | None = None,
         cache_ttl: int = 168,
-        local_fasta: Optional[Union[str, Path]] = None,
+        local_fasta: str | Path | None = None,
     ) -> None:
         self.cache = TranscriptCacheManager(cache_base=cache_dir, default_ttl=cache_ttl)
         self.local_fasta = Path(local_fasta) if local_fasta else None
-        self._entrez: Optional[EntrezFetcher] = None
+        self._entrez: EntrezFetcher | None = None
         self._api_key = api_key
         self._email = email
 
@@ -67,7 +66,7 @@ class FetchManager:
         self,
         gene_symbol: str,
         organism: str = "Homo sapiens",
-    ) -> List[TranscriptRecord]:
+    ) -> list[TranscriptRecord]:
         """Fetch transcripts by gene symbol with fallback chain.
 
         Tries in order:
@@ -97,7 +96,12 @@ class FetchManager:
         # 1. Try cache
         cached = self.cache.retrieve(cache_id, organism)
         if cached is not None:
-            logger.info("Cache hit for gene '%s' (%s) — %d transcript(s)", gene_symbol, organism, len(cached))
+            logger.info(
+                "Cache hit for gene '%s' (%s) — %d transcript(s)",
+                gene_symbol,
+                organism,
+                len(cached),
+            )
             return cached
 
         # 2. Try NCBI API
@@ -105,7 +109,11 @@ class FetchManager:
             records = self.entrez.fetch_gene(gene_symbol, organism)
             if records:
                 self.cache.store(cache_id, records, organism)
-                logger.info("NCBI fetch successful for gene '%s' — %d transcript(s)", gene_symbol, len(records))
+                logger.info(
+                    "NCBI fetch successful for gene '%s' — %d transcript(s)",
+                    gene_symbol,
+                    len(records),
+                )
                 return records
         except TranscriptFetchError as e:
             logger.warning("NCBI fetch failed for gene '%s': %s", gene_symbol, e)
@@ -177,7 +185,7 @@ class FetchManager:
             "Provide a local FASTA file or check network connectivity."
         )
 
-    def fetch_from_local(self, file_path: Union[str, Path]) -> List[TranscriptRecord]:
+    def fetch_from_local(self, file_path: str | Path) -> list[TranscriptRecord]:
         """Fetch transcripts directly from a local FASTA file.
 
         Parameters

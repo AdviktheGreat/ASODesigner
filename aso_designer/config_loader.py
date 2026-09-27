@@ -7,7 +7,6 @@ presets. Designed from scratch with layered override support
 """
 
 from pathlib import Path
-from typing import Optional, Union
 
 import yaml
 
@@ -22,7 +21,7 @@ _DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "aso_config.yaml"
 _CHEMISTRY_PRESETS_PATH = Path(__file__).parent / "config" / "chemistry_presets.yaml"
 
 
-def load_yaml(path: Union[str, Path]) -> dict:
+def load_yaml(path: str | Path) -> dict:
     """Load a YAML file into a dictionary.
 
     Parameters
@@ -63,8 +62,8 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def load_config(
-    user_config_path: Optional[Union[str, Path]] = None,
-    chemistry: Optional[str] = None,
+    user_config_path: str | Path | None = None,
+    chemistry: str | None = None,
 ) -> ASOConfig:
     """Load and validate ASODesigner configuration.
 
@@ -143,15 +142,12 @@ def _apply_chemistry_preset(config_data: dict, chemistry: str) -> dict:
         thermo["tm_optimal"] = thermo.get("tm_optimal", 52.0) + tm_adj
         logger.debug("Applied Tm adjustment %+f for %s", tm_adj, chemistry)
 
-    # Apply chemistry bonus to scoring weights
+    # Store chemistry bonus as metadata for the scoring module to use
+    # (do NOT modify scoring weights — they must always sum to 1.0)
     bonus = preset.get("chemistry_bonus", 0.0)
     if bonus:
-        scoring = config_data.setdefault("scoring", {})
-        weights = scoring.setdefault("weights", {})
-        # Distribute bonus by reducing other weights proportionally
-        if "positional" in weights:
-            weights["positional"] = max(0.0, weights.get("positional", 0.05) - bonus)
-        logger.debug("Applied chemistry bonus %f for %s", bonus, chemistry)
+        config_data.setdefault("scoring", {})["chemistry_bonus"] = bonus
+        logger.debug("Stored chemistry bonus %f for %s", bonus, chemistry)
 
     return config_data
 

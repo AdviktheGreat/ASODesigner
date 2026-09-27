@@ -12,11 +12,9 @@ Requires NCBI_API_KEY environment variable for higher rate limits
 import hashlib
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Union
-from urllib.parse import urlencode
 
 import requests
 from Bio import SeqIO
@@ -48,8 +46,8 @@ class TranscriptRecord:
     sequence: str
     gene_name: str
     organism: str
-    chromosome: Optional[str] = None
-    strand: Optional[str] = None
+    chromosome: str | None = None
+    strand: str | None = None
     description: str = ""
     length: int = 0
 
@@ -108,9 +106,9 @@ class EntrezFetcher:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        email: Optional[str] = None,
-        cache_dir: Optional[Union[str, Path]] = None,
+        api_key: str | None = None,
+        email: str | None = None,
+        cache_dir: str | Path | None = None,
         cache_ttl: int = 168,
     ) -> None:
         self.api_key = api_key or os.getenv("NCBI_API_KEY")
@@ -183,7 +181,7 @@ class EntrezFetcher:
                 return {"text": response.text}
 
             except requests.RequestException as e:
-                wait = 2 ** attempt
+                wait = 2**attempt
                 logger.warning(
                     "Request failed (attempt %d/%d): %s — retrying in %ds",
                     attempt + 1,
@@ -213,7 +211,7 @@ class EntrezFetcher:
         mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
         return datetime.now() - mtime < self.cache_ttl
 
-    def _save_cache(self, identifier: str, records: List[TranscriptRecord]) -> None:
+    def _save_cache(self, identifier: str, records: list[TranscriptRecord]) -> None:
         """Save transcript records to cache."""
         import json
 
@@ -222,7 +220,7 @@ class EntrezFetcher:
         cache_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         logger.debug("Cached %d records for '%s' at %s", len(records), identifier, cache_path)
 
-    def _load_cache(self, identifier: str) -> Optional[List[TranscriptRecord]]:
+    def _load_cache(self, identifier: str) -> list[TranscriptRecord] | None:
         """Load transcript records from cache if valid."""
         import json
 
@@ -246,7 +244,7 @@ class EntrezFetcher:
         self,
         gene_symbol: str,
         organism: str = "Homo sapiens",
-    ) -> List[str]:
+    ) -> list[str]:
         """Resolve a gene symbol to RefSeq transcript accession IDs.
 
         Uses ESearch (nucleotide db) with a gene+organism query to find
@@ -300,7 +298,7 @@ class EntrezFetcher:
             retmode="json",
         )
 
-        accessions: List[str] = []
+        accessions: list[str] = []
         for gi in id_list:
             entry = summaries.get("result", {}).get(gi, {})
             acc = entry.get("accessionversion", "")
@@ -312,11 +310,14 @@ class EntrezFetcher:
                 accessions.append(acc)
 
         if not accessions:
-            raise TranscriptFetchError(
-                f"No mRNA accessions resolved for gene '{gene_symbol}'"
-            )
+            raise TranscriptFetchError(f"No mRNA accessions resolved for gene '{gene_symbol}'")
 
-        logger.info("Resolved gene '%s' to %d transcript(s): %s", gene_symbol, len(accessions), accessions[:5])
+        logger.info(
+            "Resolved gene '%s' to %d transcript(s): %s",
+            gene_symbol,
+            len(accessions),
+            accessions[:5],
+        )
         return accessions
 
     # ------------------------------------------------------------------
@@ -395,8 +396,8 @@ class EntrezFetcher:
 
     def fetch_transcripts(
         self,
-        accessions: List[str],
-    ) -> List[TranscriptRecord]:
+        accessions: list[str],
+    ) -> list[TranscriptRecord]:
         """Fetch multiple transcripts by accession.
 
         Parameters
@@ -409,7 +410,7 @@ class EntrezFetcher:
         List[TranscriptRecord]
             Fetched transcript records.
         """
-        records: List[TranscriptRecord] = []
+        records: list[TranscriptRecord] = []
         for acc in accessions:
             try:
                 record = self.fetch_by_accession(acc)
@@ -434,8 +435,13 @@ class EntrezFetcher:
     def _parse_organism_from_description(description: str) -> str:
         """Heuristic organism extraction from FASTA description."""
         # Look for common organism names
-        for org in ("Homo sapiens", "Mus musculus", "Rattus norvegicus",
-                     "Danio rerio", "Drosophila melanogaster"):
+        for org in (
+            "Homo sapiens",
+            "Mus musculus",
+            "Rattus norvegicus",
+            "Danio rerio",
+            "Drosophila melanogaster",
+        ):
             if org in description:
                 return org
         return "unknown"
@@ -447,8 +453,8 @@ class EntrezFetcher:
     def fetch_orthologs(
         self,
         gene_symbol: str,
-        organisms: List[str],
-    ) -> dict[str, List[TranscriptRecord]]:
+        organisms: list[str],
+    ) -> dict[str, list[TranscriptRecord]]:
         """Fetch orthologous transcripts for a gene across multiple organisms.
 
         Useful for conservation analysis when designing ASOs that should
@@ -466,7 +472,7 @@ class EntrezFetcher:
         dict[str, List[TranscriptRecord]]
             Mapping of organism → list of transcript records.
         """
-        results: dict[str, List[TranscriptRecord]] = {}
+        results: dict[str, list[TranscriptRecord]] = {}
         for organism in organisms:
             try:
                 accessions = self.resolve_gene_to_transcripts(gene_symbol, organism)
@@ -495,7 +501,7 @@ class EntrezFetcher:
         self,
         gene_symbol: str,
         organism: str = "Homo sapiens",
-    ) -> List[TranscriptRecord]:
+    ) -> list[TranscriptRecord]:
         """High-level method: resolve gene symbol and fetch all transcripts.
 
         This is the primary entry point for gene-based fetching.

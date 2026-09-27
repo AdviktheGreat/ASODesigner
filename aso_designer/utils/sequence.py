@@ -5,15 +5,13 @@ functions used across modules. Designed from scratch for ASO-specific
 needs (RNA/DNA handling, IUPAC ambiguity codes, chemistry-aware operations).
 """
 
-from typing import Set
-
 from aso_designer.utils.exceptions import InvalidSequenceError
 
 # IUPAC nucleotide codes
-DNA_VALID: Set[str] = set("ACGTN")
-RNA_VALID: Set[str] = set("ACGUN")
-IUPAC_DNA: Set[str] = set("ACGTNRYSWKMBDHV")
-IUPAC_RNA: Set[str] = set("ACGUNRYSWKMBDHV")
+DNA_VALID: set[str] = set("ACGTN")
+RNA_VALID: set[str] = set("ACGUN")
+IUPAC_DNA: set[str] = set("ACGTNRYSWKMBDHV")
+IUPAC_RNA: set[str] = set("ACGUNRYSWKMBDHV")
 
 _COMPLEMENT_DNA = str.maketrans("ACGTNRYKMBWS", "TGCANRMVKVSW")
 _COMPLEMENT_RNA = str.maketrans("ACGUNRYKMBWS", "UGCANRMVKVSW")
@@ -51,15 +49,13 @@ def validate_sequence(
     seq = sequence.upper().strip()
 
     if allow_iupac:
-        valid = IUPAC_RNA if allow_rna else IUPAC_DNA
+        valid = IUPAC_DNA | IUPAC_RNA if allow_rna else IUPAC_DNA
     else:
-        valid = RNA_VALID if allow_rna else DNA_VALID
+        valid = DNA_VALID | RNA_VALID if allow_rna else DNA_VALID
 
     invalid_chars = set(seq) - valid
     if invalid_chars:
-        raise InvalidSequenceError(
-            f"Invalid characters in sequence: {sorted(invalid_chars)}"
-        )
+        raise InvalidSequenceError(f"Invalid characters in sequence: {sorted(invalid_chars)}")
 
     return seq
 
@@ -119,10 +115,19 @@ def gc_content(sequence: str) -> float:
     """
     seq = sequence.upper()
     gc = seq.count("G") + seq.count("C")
-    total = len(seq) - (seq.count("N") + seq.count("R") + seq.count("Y") +
-                        seq.count("S") + seq.count("W") + seq.count("K") +
-                        seq.count("M") + seq.count("B") + seq.count("D") +
-                        seq.count("H") + seq.count("V"))
+    total = len(seq) - (
+        seq.count("N")
+        + seq.count("R")
+        + seq.count("Y")
+        + seq.count("S")
+        + seq.count("W")
+        + seq.count("K")
+        + seq.count("M")
+        + seq.count("B")
+        + seq.count("D")
+        + seq.count("H")
+        + seq.count("V")
+    )
     if total == 0:
         return 0.0
     return gc / total

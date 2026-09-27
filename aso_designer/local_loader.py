@@ -7,10 +7,8 @@ with the TranscriptRecord dataclass.
 """
 
 from pathlib import Path
-from typing import List, Optional, Union
 
 from Bio import SeqIO
-from Bio.SeqRecord import SeqRecord
 
 from aso_designer.transcript_fetcher import TranscriptRecord
 from aso_designer.utils.exceptions import InvalidSequenceError, TranscriptFetchError
@@ -21,10 +19,10 @@ logger = get_logger(__name__)
 
 
 def load_fasta(
-    file_path: Union[str, Path],
+    file_path: str | Path,
     min_length: int = 100,
     allow_iupac: bool = True,
-) -> List[TranscriptRecord]:
+) -> list[TranscriptRecord]:
     """Load transcript sequences from a local FASTA file.
 
     Parameters
@@ -50,14 +48,16 @@ def load_fasta(
     if not path.exists():
         raise TranscriptFetchError(f"FASTA file not found: {path}")
 
-    records: List[TranscriptRecord] = []
+    records: list[TranscriptRecord] = []
     try:
         for seq_record in SeqIO.parse(str(path), "fasta"):
             sequence = str(seq_record.seq).upper()
 
             # Skip sequences below minimum length
             if len(sequence) < min_length:
-                logger.debug("Skipping %s: too short (%d nt < %d)", seq_record.id, len(sequence), min_length)
+                logger.debug(
+                    "Skipping %s: too short (%d nt < %d)", seq_record.id, len(sequence), min_length
+                )
                 continue
 
             # Validate sequence content
@@ -93,7 +93,7 @@ def load_fasta(
 
 
 def load_single_fasta(
-    file_path: Union[str, Path],
+    file_path: str | Path,
     min_length: int = 100,
 ) -> TranscriptRecord:
     """Load a single transcript from a FASTA file.
@@ -136,9 +136,14 @@ def _parse_gene_from_header(description: str, accession: str) -> str:
 def _parse_organism_from_header(description: str) -> str:
     """Extract organism name from a FASTA header (heuristic)."""
     _common_organisms = (
-        "Homo sapiens", "Mus musculus", "Rattus norvegicus",
-        "Danio rerio", "Drosophila melanogaster", "Caenorhabditis elegans",
-        "Saccharomyces cerevisiae", "Arabidopsis thaliana",
+        "Homo sapiens",
+        "Mus musculus",
+        "Rattus norvegicus",
+        "Danio rerio",
+        "Drosophila melanogaster",
+        "Caenorhabditis elegans",
+        "Saccharomyces cerevisiae",
+        "Arabidopsis thaliana",
     )
     for org in _common_organisms:
         if org in description:

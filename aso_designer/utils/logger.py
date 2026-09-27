@@ -9,7 +9,6 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional, Union
 
 DEFAULT_FORMAT = "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -17,8 +16,8 @@ DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 def setup_logger(
     name: str = "asodesigner",
-    level: Union[int, str] = logging.INFO,
-    log_file: Optional[Union[str, Path]] = None,
+    level: int | str = logging.INFO,
+    log_file: str | Path | None = None,
     max_bytes: int = 5 * 1024 * 1024,
     backup_count: int = 3,
 ) -> logging.Logger:

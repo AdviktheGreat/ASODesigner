@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 with open("README.md", encoding="utf-8") as f:
     long_description = f.read()
@@ -7,6 +7,10 @@ setup(
     name="asodesigner",
     version="0.0.1",
     packages=find_packages(),
+    package_data={
+        "aso_designer": ["config/*.yaml"],
+    },
+    include_package_data=True,
     python_requires=">=3.10",
     install_requires=[
         "biopython>=1.81",
