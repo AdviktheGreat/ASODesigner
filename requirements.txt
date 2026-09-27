@@ -1,0 +1,15 @@
+# Core runtime dependencies for ASODesigner
+biopython>=1.81
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+plotly>=5.14
+pydantic>=2.0
+pyyaml>=6.0
+requests>=2.28
+tqdm>=4.65
+click>=8.1
+
+# Optional: VCF parsing for variant awareness
+# Install with: pip install asodesigner[vcf]
+# cyvcf2>=0.30
