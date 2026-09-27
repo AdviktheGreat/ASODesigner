@@ -354,3 +354,156 @@ def classify_position(metadata: TranscriptMetadata, position: int) -> str:
         if start <= position < end:
             return label
     return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Multi-isoform support
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TranscriptSet:
+    """A collection of transcript isoforms for a single gene.
+
+    Stores multiple transcripts (e.g. RefSeq NM_ accessions for the
+    same gene), provides comparison utilities, and allows selection
+    of a representative transcript for ASO design.
+
+    Attributes
+    ----------
+    gene_name : str
+        Gene symbol shared by all transcripts.
+    organism : str
+        Organism name.
+    transcripts : list[TranscriptRecord]
+        All isoform transcripts.
+    metadata : list[TranscriptMetadata]
+        Extracted metadata for each transcript (populated on first access).
+    """
+
+    gene_name: str
+    organism: str
+    transcripts: list[TranscriptRecord] = field(default_factory=list)
+    _metadata: list[TranscriptMetadata] | None = None
+
+    def add_transcript(self, record: TranscriptRecord) -> None:
+        """Add a transcript isoform to the set."""
+        if record.gene_name and record.gene_name != self.gene_name:
+            logger.warning(
+                "Adding transcript with gene '%s' to set for gene '%s'",
+                record.gene_name,
+                self.gene_name,
+            )
+        self.transcripts.append(record)
+        self._metadata = None  # Invalidate cached metadata
+
+    def get_metadata(self) -> list[TranscriptMetadata]:
+        """Get metadata for all transcripts (computed once, then cached)."""
+        if self._metadata is None:
+            self._metadata = [extract_metadata(r) for r in self.transcripts]
+        return self._metadata
+
+    def longest_transcript(self) -> TranscriptRecord | None:
+        """Return the longest transcript isoform.
+
+        This is the default selection for ASO design since longer
+        transcripts provide more candidate sites and typically include
+        all exon junctions.
+
+        Returns
+        -------
+        TranscriptRecord or None
+            The longest transcript, or None if the set is empty.
+        """
+        if not self.transcripts:
+            return None
+        return max(self.transcripts, key=lambda r: r.length)
+
+    def longest_cds_transcript(self) -> TranscriptRecord | None:
+        """Return the transcript with the longest CDS.
+
+        Useful when ASO design should target coding regions.
+
+        Returns
+        -------
+        TranscriptRecord or None
+            The transcript with the longest detected CDS, or None if empty.
+        """
+        if not self.transcripts:
+            return None
+        metas = self.get_metadata()
+        best_idx = max(range(len(metas)), key=lambda i: metas[i].cds_length)
+        return self.transcripts[best_idx]
+
+    def shared_regions(self, min_overlap: int = 20) -> list[tuple[int, int]]:
+        """Find regions shared across all isoforms (by sequence alignment).
+
+        Uses a simple prefix/suffix matching heuristic to identify
+        regions present in all transcripts. This is a simplified
+        approach — for rigorous isoform comparison, use an external
+        alignment tool.
+
+        Parameters
+        ----------
+        min_overlap : int
+            Minimum shared region length to report (default 20 nt).
+
+        Returns
+        -------
+        list[tuple[int, int]]
+            List of (start, end) shared regions in the longest transcript
+            coordinate system.
+        """
+        if len(self.transcripts) < 2:
+            longest = self.longest_transcript()
+            if longest:
+                return [(0, longest.length)]
+            return []
+
+        longest = self.longest_transcript()
+        if longest is None:
+            return []
+
+        ref_seq = longest.sequence
+        shared: list[tuple[int, int]] = []
+
+        # Find common subsequences by checking each transcript
+        # against the longest one using a sliding window
+        window = min_overlap
+        for i in range(0, len(ref_seq) - window + 1):
+            kmer = ref_seq[i : i + window]
+            in_all = True
+            for other in self.transcripts:
+                if other is longest:
+                    continue
+                if kmer not in other.sequence:
+                    in_all = False
+                    break
+            if in_all:
+                # Extend the shared region
+                if shared and shared[-1][1] == i:
+                    shared[-1] = (shared[-1][0], i + window)
+                else:
+                    shared.append((i, i + window))
+
+        return shared
+
+    def summary(self) -> dict:
+        """Return a summary of the isoform set.
+
+        Returns
+        -------
+        dict
+            Summary with isoform count, lengths, and CDS info.
+        """
+        metas = self.get_metadata()
+        return {
+            "gene_name": self.gene_name,
+            "organism": self.organism,
+            "isoform_count": len(self.transcripts),
+            "accessions": [r.accession for r in self.transcripts],
+            "lengths": [r.length for r in self.transcripts],
+            "cds_lengths": [m.cds_length for m in metas],
+            "longest_accession": self.longest_transcript().accession if self.transcripts else None,
+            "longest_length": self.longest_transcript().length if self.transcripts else 0,
+        }
