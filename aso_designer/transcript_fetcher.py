@@ -318,3 +318,124 @@ class EntrezFetcher:
 
         logger.info("Resolved gene '%s' to %d transcript(s): %s", gene_symbol, len(accessions), accessions[:5])
         return accessions
+
+    # ------------------------------------------------------------------
+    # Accession-based fetch
+    # ------------------------------------------------------------------
+
+    def fetch_by_accession(self, accession: str) -> TranscriptRecord:
+        """Fetch a single transcript by its RefSeq accession ID.
+
+        Parameters
+        ----------
+        accession : str
+            RefSeq accession (e.g. "NM_000109.3").
+
+        Returns
+        -------
+        TranscriptRecord
+            Fetched transcript with sequence and metadata.
+
+        Raises
+        ------
+        TranscriptFetchError
+            If the fetch fails or the sequence is invalid.
+        """
+        cache_id = f"acc:{accession}"
+        cached = self._load_cache(cache_id)
+        if cached is not None and len(cached) > 0:
+            return cached[0]
+
+        # EFetch in GenBank mode to get sequence + features
+        result = self._get(
+            "efetch.fcgi",
+            db="nucleotide",
+            id=accession,
+            rettype="fasta",
+            retmode="text",
+        )
+
+        text = result.get("text", "")
+        if not text:
+            raise TranscriptFetchError(f"No data returned for accession '{accession}'")
+
+        # Parse FASTA
+        from io import StringIO
+
+        records = list(SeqIO.parse(StringIO(text), "fasta"))
+        if not records:
+            raise TranscriptFetchError(f"Failed to parse FASTA for accession '{accession}'")
+
+        seq_record = records[0]
+        sequence = str(seq_record.seq).upper()
+
+        # Validate the sequence
+        try:
+            sequence = validate_sequence(sequence, allow_rna=False, allow_iupac=True)
+        except Exception as e:
+            raise TranscriptFetchError(f"Invalid sequence for '{accession}': {e}") from e
+
+        # Extract metadata from the FASTA header
+        description = seq_record.description
+        # Parse gene name and organism from description (heuristic)
+        gene_name = self._parse_gene_from_description(description, accession)
+        organism = self._parse_organism_from_description(description)
+
+        record = TranscriptRecord(
+            accession=accession,
+            sequence=sequence,
+            gene_name=gene_name,
+            organism=organism,
+            description=description,
+        )
+
+        self._save_cache(cache_id, [record])
+        logger.info("Fetched %s (%d nt, gene=%s)", accession, record.length, gene_name)
+        return record
+
+    def fetch_transcripts(
+        self,
+        accessions: List[str],
+    ) -> List[TranscriptRecord]:
+        """Fetch multiple transcripts by accession.
+
+        Parameters
+        ----------
+        accessions : List[str]
+            List of RefSeq accession IDs.
+
+        Returns
+        -------
+        List[TranscriptRecord]
+            Fetched transcript records.
+        """
+        records: List[TranscriptRecord] = []
+        for acc in accessions:
+            try:
+                record = self.fetch_by_accession(acc)
+                records.append(record)
+            except TranscriptFetchError as e:
+                logger.warning("Failed to fetch %s: %s", acc, e)
+        return records
+
+    @staticmethod
+    def _parse_gene_from_description(description: str, accession: str) -> str:
+        """Heuristic gene name extraction from FASTA description."""
+        # RefSeq FASTA headers often contain gene name in the description
+        # e.g. "NM_000109.4 Homo sapiens dystrophin (DMD), mRNA"
+        import re
+
+        match = re.search(r"\(([A-Z0-9]+)\)", description)
+        if match:
+            return match.group(1)
+        return accession.split("_")[0] if "_" in accession else "unknown"
+
+    @staticmethod
+    def _parse_organism_from_description(description: str) -> str:
+        """Heuristic organism extraction from FASTA description."""
+        # Look for common organism names
+        for org in ("Homo sapiens", "Mus musculus", "Rattus norvegicus",
+                     "Danio rerio", "Drosophila melanogaster"):
+            if org in description:
+                return org
+        return "unknown"
