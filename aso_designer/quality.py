@@ -507,3 +507,127 @@ class TranscriptSet:
             "longest_accession": self.longest_transcript().accession if self.transcripts else None,
             "longest_length": self.longest_transcript().length if self.transcripts else 0,
         }
+
+
+# ---------------------------------------------------------------------------
+# Batch quality report generation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BatchQualityReport:
+    """Aggregate quality assessment across multiple transcripts.
+
+    Provides summary statistics, per-transcript reports, and flags
+    transcripts that may be problematic for ASO design.
+    """
+
+    total_count: int
+    valid_count: int
+    invalid_count: int
+    warning_count: int
+    min_length: int
+    max_length: int
+    mean_length: float
+    total_ambiguous: int
+    transcripts_with_cds: int
+    transcripts_without_cds: int
+    per_transcript: list[QualityReport] = field(default_factory=list)
+    flagged: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "total_count": self.total_count,
+            "valid_count": self.valid_count,
+            "invalid_count": self.invalid_count,
+            "warning_count": self.warning_count,
+            "min_length": self.min_length,
+            "max_length": self.max_length,
+            "mean_length": round(self.mean_length, 1),
+            "total_ambiguous": self.total_ambiguous,
+            "transcripts_with_cds": self.transcripts_with_cds,
+            "transcripts_without_cds": self.transcripts_without_cds,
+            "per_transcript": [r.to_dict() for r in self.per_transcript],
+            "flagged": self.flagged,
+        }
+
+
+def generate_quality_report(
+    records: list[TranscriptRecord],
+    min_length: int = 200,
+    max_ambiguous_fraction: float = 0.05,
+    require_cds: bool = False,
+) -> BatchQualityReport:
+    """Generate a batch quality report across multiple transcripts.
+
+    Validates each transcript, aggregates statistics, and flags
+    transcripts that may be problematic for ASO design.
+
+    Parameters
+    ----------
+    records : list[TranscriptRecord]
+        Transcript records to assess.
+    min_length : int
+        Minimum acceptable sequence length (default 200 nt).
+    max_ambiguous_fraction : float
+        Maximum fraction of ambiguous bases (default 5%).
+    require_cds : bool
+        If True, a CDS must be detected for validity.
+
+    Returns
+    -------
+    BatchQualityReport
+        Aggregate quality assessment with per-transcript details.
+    """
+    reports: list[QualityReport] = []
+    flagged: list[str] = []
+
+    for record in records:
+        report = validate_transcript(
+            record,
+            min_length=min_length,
+            max_ambiguous_fraction=max_ambiguous_fraction,
+            require_cds=require_cds,
+        )
+        reports.append(report)
+
+        # Flag transcripts with specific issues
+        if not report.is_valid:
+            flagged.append(f"{record.accession}: {'; '.join(report.errors)}")
+        elif report.warnings:
+            for warning in report.warnings:
+                if "ambiguous" in warning.lower():
+                    flagged.append(f"{record.accession}: {warning}")
+                elif "No CDS" in warning:
+                    flagged.append(f"{record.accession}: {warning}")
+
+    lengths = [r.length for r in records] if records else [0]
+    valid_count = sum(1 for r in reports if r.is_valid)
+    warning_count = sum(1 for r in reports if r.is_valid and r.warnings)
+    total_ambiguous = sum(r.ambiguous_count for r in reports)
+    with_cds = sum(1 for r in reports if r.has_cds)
+
+    batch = BatchQualityReport(
+        total_count=len(records),
+        valid_count=valid_count,
+        invalid_count=len(records) - valid_count,
+        warning_count=warning_count,
+        min_length=min(lengths) if lengths else 0,
+        max_length=max(lengths) if lengths else 0,
+        mean_length=sum(lengths) / len(lengths) if lengths else 0.0,
+        total_ambiguous=total_ambiguous,
+        transcripts_with_cds=with_cds,
+        transcripts_without_cds=len(records) - with_cds,
+        per_transcript=reports,
+        flagged=flagged,
+    )
+
+    logger.info(
+        "Batch quality report: %d/%d valid, %d with warnings, %d flagged",
+        valid_count,
+        len(records),
+        warning_count,
+        len(flagged),
+    )
+
+    return batch
