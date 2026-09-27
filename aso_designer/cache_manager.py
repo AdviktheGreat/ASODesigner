@@ -130,3 +130,91 @@ class TranscriptCacheManager:
             logger.info("Invalidated cache for '%s'", identifier)
             return True
         return False
+
+    # ------------------------------------------------------------------
+    # Inspection and management utilities
+    # ------------------------------------------------------------------
+
+    def inspect(self) -> Dict[str, dict]:
+        """Inspect the cache and return a summary per organism.
+
+        Returns
+        -------
+        dict
+            Mapping of organism → {files, total_size_bytes, oldest_entry, newest_entry}.
+        """
+        report: Dict[str, dict] = {}
+        for org_dir in sorted(self.cache_base.iterdir()):
+            if not org_dir.is_dir():
+                continue
+            organism = org_dir.name.replace("_", " ")
+            files = list(org_dir.glob("*.json"))
+            if not files:
+                continue
+            total_size = sum(f.stat().st_size for f in files)
+            mtimes = [datetime.fromtimestamp(f.stat().st_mtime) for f in files]
+            report[organism] = {
+                "files": len(files),
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "oldest_entry": min(mtimes).isoformat(),
+                "newest_entry": max(mtimes).isoformat(),
+            }
+        return report
+
+    def clear_organism(self, organism: str) -> int:
+        """Clear all cached entries for a specific organism.
+
+        Parameters
+        ----------
+        organism : str
+            Organism name (will be normalized to directory name).
+
+        Returns
+        -------
+        int
+            Number of files deleted.
+        """
+        org_dir = self._organism_dir(organism)
+        count = 0
+        for f in org_dir.glob("*.json"):
+            f.unlink()
+            count += 1
+        logger.info("Cleared %d cache entries for %s", count, organism)
+        return count
+
+    def clear_all(self) -> int:
+        """Clear the entire cache.
+
+        Returns
+        -------
+        int
+            Number of files deleted.
+        """
+        count = 0
+        for org_dir in self.cache_base.iterdir():
+            if not org_dir.is_dir():
+                continue
+            for f in org_dir.glob("*.json"):
+                f.unlink()
+                count += 1
+        logger.info("Cleared entire cache (%d files)", count)
+        return count
+
+    def total_size_bytes(self) -> int:
+        """Return total cache size in bytes."""
+        total = 0
+        for org_dir in self.cache_base.iterdir():
+            if not org_dir.is_dir():
+                continue
+            total += sum(f.stat().st_size for f in org_dir.glob("*.json"))
+        return total
+
+    def total_entries(self) -> int:
+        """Return total number of cached entries."""
+        count = 0
+        for org_dir in self.cache_base.iterdir():
+            if not org_dir.is_dir():
+                continue
+            count += len(list(org_dir.glob("*.json")))
+        return count
