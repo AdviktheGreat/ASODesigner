@@ -211,3 +211,146 @@ def validate_transcript(
         logger.info("Transcript %s passed with warnings: %s", record.accession, warnings)
 
     return report
+
+
+# ---------------------------------------------------------------------------
+# Transcript metadata extraction
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TranscriptMetadata:
+    """Extracted metadata and region annotation for a transcript.
+
+    When GenBank annotation is not available, regions are inferred
+    from ORF detection: the longest ORF is treated as the CDS, and
+    flanking sequences are classified as 5' and 3' UTR.
+    """
+
+    accession: str
+    gene_name: str
+    organism: str
+    length: int
+    chromosome: str | None = None
+    strand: str | None = None
+    five_utr_start: int | None = None
+    five_utr_end: int | None = None
+    five_utr_length: int = 0
+    cds_start: int | None = None
+    cds_end: int | None = None
+    cds_length: int = 0
+    three_utr_start: int | None = None
+    three_utr_end: int | None = None
+    three_utr_length: int = 0
+    region_map: list[tuple[int, int, str]] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "accession": self.accession,
+            "gene_name": self.gene_name,
+            "organism": self.organism,
+            "length": self.length,
+            "chromosome": self.chromosome,
+            "strand": self.strand,
+            "five_utr_start": self.five_utr_start,
+            "five_utr_end": self.five_utr_end,
+            "five_utr_length": self.five_utr_length,
+            "cds_start": self.cds_start,
+            "cds_end": self.cds_end,
+            "cds_length": self.cds_length,
+            "three_utr_start": self.three_utr_start,
+            "three_utr_end": self.three_utr_end,
+            "three_utr_length": self.three_utr_length,
+            "region_map": self.region_map,
+        }
+
+
+def extract_metadata(record: TranscriptRecord) -> TranscriptMetadata:
+    """Extract structured metadata and region annotations from a transcript.
+
+    Infers 5' UTR, CDS, and 3' UTR boundaries from ORF detection when
+    GenBank annotation is not available. The longest ORF is treated as
+    the CDS; flanking sequences are classified as UTRs.
+
+    Parameters
+    ----------
+    record : TranscriptRecord
+        The transcript to annotate.
+
+    Returns
+    -------
+    TranscriptMetadata
+        Structured metadata with region boundaries.
+    """
+    seq = record.sequence.upper()
+    length = len(seq)
+
+    cds = detect_cds(seq)
+
+    meta = TranscriptMetadata(
+        accession=record.accession,
+        gene_name=record.gene_name,
+        organism=record.organism,
+        length=length,
+        chromosome=record.chromosome,
+        strand=record.strand,
+    )
+
+    if cds is not None:
+        cds_start, cds_end = cds
+        meta.cds_start = cds_start
+        meta.cds_end = cds_end
+        meta.cds_length = cds_end - cds_start
+
+        # 5' UTR: everything before the CDS
+        if cds_start > 0:
+            meta.five_utr_start = 0
+            meta.five_utr_end = cds_start
+            meta.five_utr_length = cds_start
+
+        # 3' UTR: everything after the CDS
+        if cds_end < length:
+            meta.three_utr_start = cds_end
+            meta.three_utr_end = length
+            meta.three_utr_length = length - cds_end
+
+        # Build region map: (start, end, label) tuples
+        if meta.five_utr_length > 0:
+            meta.region_map.append((0, cds_start, "5UTR"))
+        meta.region_map.append((cds_start, cds_end, "CDS"))
+        if meta.three_utr_length > 0:
+            meta.region_map.append((cds_end, length, "3UTR"))
+    else:
+        # No CDS found — entire transcript is non-coding
+        meta.region_map.append((0, length, "noncoding"))
+
+    logger.debug(
+        "Extracted metadata for %s: CDS=%s, 5'UTR=%d nt, 3'UTR=%d nt",
+        record.accession,
+        f"{meta.cds_start}-{meta.cds_end}" if meta.cds_start is not None else "none",
+        meta.five_utr_length,
+        meta.three_utr_length,
+    )
+
+    return meta
+
+
+def classify_position(metadata: TranscriptMetadata, position: int) -> str:
+    """Classify a transcript position into a region (5UTR, CDS, 3UTR, noncoding).
+
+    Parameters
+    ----------
+    metadata : TranscriptMetadata
+        Transcript metadata with region annotations.
+    position : int
+        Zero-based position in the transcript.
+
+    Returns
+    -------
+    str
+        Region label: "5UTR", "CDS", "3UTR", or "noncoding".
+    """
+    for start, end, label in metadata.region_map:
+        if start <= position < end:
+            return label
+    return "unknown"
