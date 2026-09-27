@@ -102,9 +102,9 @@ class TranscriptCacheManager:
             return None
 
         # Check TTL
-        effective_ttl = ttl or self.default_ttl
+        effective_ttl = ttl if ttl is not None else self.default_ttl
         mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
-        if datetime.now() - mtime > effective_ttl:
+        if datetime.now() - mtime >= effective_ttl:
             logger.debug("Cache expired for '%s' (age: %s)", identifier, datetime.now() - mtime)
             return None
 
