@@ -204,3 +204,92 @@ class FullChemistryDesign:
 
     def is_rnase_h_eligible(self) -> bool:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Chemistry factory and application
+# ---------------------------------------------------------------------------
+
+from aso_designer.candidate import ASOCandidate  # noqa: E402
+from aso_designer.config_schema import CandidateConfig, GapmerConfig, MixmerConfig  # noqa: E402
+
+
+def create_chemistry_design(
+    config: CandidateConfig,
+    gapmer_config: GapmerConfig | None = None,
+    mixmer_config: MixmerConfig | None = None,
+) -> ChemistryDesign:
+    """Create the appropriate chemistry design from configuration.
+
+    Parameters
+    ----------
+    config : CandidateConfig
+        Candidate configuration (contains chemistry type and length).
+    gapmer_config : GapmerConfig, optional
+        Gapmer-specific parameters (used if chemistry is "gapmer").
+    mixmer_config : MixmerConfig, optional
+        Mixmer-specific parameters (used if chemistry is "mixmer").
+
+    Returns
+    -------
+    ChemistryDesign
+        The chemistry design strategy for the configured chemistry type.
+
+    Raises
+    ------
+    ConfigurationError
+        If the chemistry type is invalid or required config is missing.
+    """
+    chemistry = config.chemistry
+
+    if chemistry == "gapmer":
+        if gapmer_config is None:
+            gapmer_config = GapmerConfig()
+        return GapmerDesign(
+            gap_size=gapmer_config.gap_size,
+            wing_length=gapmer_config.wing_length,
+            wing_chemistry=gapmer_config.wing_chemistry,
+        )
+
+    elif chemistry == "mixmer":
+        if mixmer_config is None:
+            mixmer_config = MixmerConfig()
+        return MixmerDesign(
+            pattern=mixmer_config.pattern if mixmer_config.pattern else None,
+            modification=mixmer_config.modification,
+        )
+
+    elif chemistry in ("2ome", "moe", "morpholino"):
+        return FullChemistryDesign(mod_type=chemistry)
+
+    else:
+        raise ConfigurationError(f"Unknown chemistry type: '{chemistry}'")
+
+
+def apply_chemistry(
+    candidates: list[ASOCandidate],
+    design: ChemistryDesign,
+) -> None:
+    """Apply a chemistry design to all candidates (in place).
+
+    Sets the ``modification_pattern`` on each candidate and stores
+    RNase H eligibility in the features dict.
+
+    Parameters
+    ----------
+    candidates : list[ASOCandidate]
+        Candidates to annotate (modified in place).
+    design : ChemistryDesign
+        The chemistry design strategy to apply.
+    """
+    rnase_h = design.is_rnase_h_eligible()
+    for candidate in candidates:
+        candidate.modification_pattern = design.build_pattern(candidate.length)
+        candidate.features["rnase_h_eligible"] = rnase_h
+
+    logger.info(
+        "Applied %s chemistry to %d candidates (RNase H: %s)",
+        candidate.chemistry,
+        len(candidates),
+        rnase_h,
+    )
