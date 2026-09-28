@@ -205,6 +205,117 @@ def generate_candidates_batched(
 
 
 # ---------------------------------------------------------------------------
+# Memory management utilities
+# ---------------------------------------------------------------------------
+
+# Estimated memory per ASOCandidate (bytes) — empirically measured
+# from the dataclass with typical feature/score dicts populated.
+_ESTIMATED_BYTES_PER_CANDIDATE = 512
+
+
+def count_candidates(
+    sequence: str,
+    config: CandidateConfig,
+    regions: Sequence[tuple[int, int]] | None = None,
+) -> int:
+    """Count the number of candidates that would be generated.
+
+    Useful for estimating memory usage before generation. Does not
+    actually create candidate objects.
+
+    Parameters
+    ----------
+    sequence : str
+        Target transcript sequence.
+    config : CandidateConfig
+        Candidate generation parameters.
+    regions : Sequence of (int, int), optional
+        Specific regions to count within. If None, counts across the
+        entire transcript.
+
+    Returns
+    -------
+    int
+        Number of candidates that would be generated.
+    """
+    seq_len = len(sequence)
+    aso_len = config.length
+    step = config.step
+
+    if aso_len > seq_len:
+        return 0
+
+    if regions is not None:
+        scan_regions = list(regions)
+    else:
+        scan_regions = [(0, seq_len)]
+
+    total = 0
+    for region_start, region_end in scan_regions:
+        if region_start < 0 or region_end > seq_len or region_start >= region_end:
+            continue
+        region_len = region_end - region_start
+        max_start = region_len - aso_len
+        if max_start < 0:
+            continue
+        total += (max_start // step) + 1
+
+    return total
+
+
+def estimate_memory_mb(
+    sequence: str,
+    config: CandidateConfig,
+    regions: Sequence[tuple[int, int]] | None = None,
+) -> float:
+    """Estimate memory usage for candidate generation in megabytes.
+
+    Parameters
+    ----------
+    sequence : str
+        Target transcript sequence.
+    config : CandidateConfig
+        Candidate generation parameters.
+    regions : Sequence of (int, int), optional
+        Specific regions.
+
+    Returns
+    -------
+    float
+        Estimated memory in MB.
+    """
+    n = count_candidates(sequence, config, regions)
+    return (n * _ESTIMATED_BYTES_PER_CANDIDATE) / (1024 * 1024)
+
+
+def should_use_batching(
+    sequence: str,
+    config: CandidateConfig,
+    memory_threshold_mb: float = 500.0,
+    regions: Sequence[tuple[int, int]] | None = None,
+) -> bool:
+    """Determine whether batched generation is recommended.
+
+    Parameters
+    ----------
+    sequence : str
+        Target transcript sequence.
+    config : CandidateConfig
+        Candidate generation parameters.
+    memory_threshold_mb : float
+        Memory threshold above which batching is recommended (default 500 MB).
+    regions : Sequence of (int, int), optional
+        Specific regions.
+
+    Returns
+    -------
+    bool
+        True if estimated memory exceeds the threshold.
+    """
+    return estimate_memory_mb(sequence, config, regions) > memory_threshold_mb
+
+
+# ---------------------------------------------------------------------------
 # Exon-aware coordinate mapping
 # ---------------------------------------------------------------------------
 
