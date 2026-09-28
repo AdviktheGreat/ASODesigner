@@ -96,7 +96,7 @@ def generate_candidates(
             # Skip sequences with invalid characters
             try:
                 subseq = validate_sequence(subseq, allow_rna=False, allow_iupac=False)
-            except ValueError:
+            except Exception:
                 logger.debug("Skipping candidate at %d: invalid characters", abs_start)
                 continue
 
@@ -176,7 +176,7 @@ def generate_candidates_batched(
 
         try:
             subseq = validate_sequence(subseq, allow_rna=False, allow_iupac=False)
-        except ValueError:
+        except Exception:
             continue
 
         gc = gc_content(subseq)
