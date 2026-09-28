@@ -293,3 +293,101 @@ def apply_chemistry(
         len(candidates),
         rnase_h,
     )
+
+
+# ---------------------------------------------------------------------------
+# Mixmer custom pattern utilities
+# ---------------------------------------------------------------------------
+
+# Scheme characters for custom mixmer patterns
+_SCHEME_MODIFIED = {"M", "m"}  # Modified nucleotide
+_SCHEME_DNA = {"D", "d", "."}  # DNA (unmodified)
+
+
+def parse_mixmer_scheme(scheme: str) -> list[bool]:
+    """Parse a mixmer scheme string into a boolean modification pattern.
+
+    Scheme characters:
+    - 'M' or 'm': modified nucleotide (True)
+    - 'D', 'd', or '.': DNA / unmodified (False)
+
+    Example: "MMDMMDDMMDM" → [True, True, False, True, True, False, False, True, True, False, True]
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme string (case-insensitive).
+
+    Returns
+    -------
+    list[bool]
+        Boolean pattern where True = modified.
+
+    Raises
+    ------
+    ConfigurationError
+        If the scheme contains invalid characters.
+    """
+    pattern: list[bool] = []
+    for i, char in enumerate(scheme):
+        if char in _SCHEME_MODIFIED:
+            pattern.append(True)
+        elif char in _SCHEME_DNA:
+            pattern.append(False)
+        else:
+            raise ConfigurationError(
+                f"Invalid character '{char}' at position {i} in mixmer scheme. "
+                f"Use M (modified), D or . (DNA)."
+            )
+    return pattern
+
+
+def has_continuous_dna_gap(pattern: list[bool], min_gap: int = 4) -> bool:
+    """Check if a mixmer pattern has a contiguous DNA gap sufficient for RNase H.
+
+    RNase H requires a minimum contiguous DNA stretch (typically ≥4 nt)
+    to recruit and cleave the RNA target.
+
+    Parameters
+    ----------
+    pattern : list[bool]
+        Boolean modification pattern (False = DNA).
+    min_gap : int
+        Minimum contiguous DNA stretch for RNase H (default 4).
+
+    Returns
+    -------
+    bool
+        True if the pattern has a contiguous DNA gap of at least min_gap.
+    """
+    current_gap = 0
+    for is_modified in pattern:
+        if not is_modified:
+            current_gap += 1
+            if current_gap >= min_gap:
+                return True
+        else:
+            current_gap = 0
+    return False
+
+
+def mixmer_from_scheme(
+    scheme: str,
+    modification: str = "2ome",
+) -> MixmerDesign:
+    """Create a MixmerDesign from a scheme string.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme string (e.g. "MMDMMDDMMDM").
+    modification : str
+        Modification type for modified positions: "2ome" or "moe".
+
+    Returns
+    -------
+    MixmerDesign
+        Configured mixmer design with the parsed pattern.
+    """
+    pattern = parse_mixmer_scheme(scheme)
+    return MixmerDesign(pattern=pattern, modification=modification)
