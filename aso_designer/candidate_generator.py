@@ -8,6 +8,7 @@ transcripts.
 """
 
 from collections.abc import Generator, Sequence
+from dataclasses import dataclass
 
 from aso_designer.candidate import ASOCandidate
 from aso_designer.config_schema import CandidateConfig
@@ -201,3 +202,135 @@ def generate_candidates_batched(
 
     if batch:
         yield batch
+
+
+# ---------------------------------------------------------------------------
+# Exon-aware coordinate mapping
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ExonMap:
+    """Maps transcript coordinates to exon coordinates.
+
+    Stores exon boundaries in transcript coordinates (0-based) and
+    provides utilities to determine which exon a position falls in,
+    and whether a candidate spans an exon-exon junction.
+
+    Attributes
+    ----------
+    exons : list[tuple[int, int]]
+        List of (start, end) exon boundaries in transcript coordinates.
+        Each exon is [start, end) — start inclusive, end exclusive.
+    """
+
+    exons: list[tuple[int, int]]
+
+    def __post_init__(self) -> None:
+        # Sort exons by start position and validate no overlaps
+        self.exons.sort(key=lambda e: e[0])
+        for i in range(1, len(self.exons)):
+            if self.exons[i][0] < self.exons[i - 1][1]:
+                raise ValueError(f"Overlapping exons: {self.exons[i - 1]} and {self.exons[i]}")
+
+    def exon_index(self, position: int) -> int | None:
+        """Return the exon index (0-based) containing a position, or None.
+
+        Parameters
+        ----------
+        position : int
+            Transcript coordinate (0-based).
+
+        Returns
+        -------
+        int or None
+            Exon index, or None if the position is in an intron.
+        """
+        for i, (start, end) in enumerate(self.exons):
+            if start <= position < end:
+                return i
+        return None
+
+    def spans_junction(self, candidate: ASOCandidate) -> bool:
+        """Check if a candidate spans an exon-exon junction.
+
+        A candidate spans a junction if its start and end fall in
+        different exons (or if it crosses an intron).
+
+        Parameters
+        ----------
+        candidate : ASOCandidate
+            The ASO candidate to check.
+
+        Returns
+        -------
+        bool
+            True if the candidate spans at least one exon junction.
+        """
+        start_exon = self.exon_index(candidate.start)
+        end_exon = self.exon_index(candidate.end - 1)
+        return start_exon is not None and end_exon is not None and start_exon != end_exon
+
+    def junction_positions(self, candidate: ASOCandidate) -> list[int]:
+        """Return all exon junction positions within a candidate's span.
+
+        Parameters
+        ----------
+        candidate : ASOCandidate
+            The ASO candidate to check.
+
+        Returns
+        -------
+        list[int]
+            Transcript positions where exon-exon junctions occur within
+            the candidate's [start, end) range.
+        """
+        junctions: list[int] = []
+        for i in range(1, len(self.exons)):
+            junction_pos = self.exons[i][0]  # Start of exon i = end of exon i-1
+            if candidate.start < junction_pos < candidate.end:
+                junctions.append(junction_pos)
+        return junctions
+
+    def annotate_candidate(self, candidate: ASOCandidate) -> None:
+        """Annotate a candidate with exon and junction information.
+
+        Adds the following to the candidate's features dict:
+        - "exon_index": exon index of the candidate start (or None)
+        - "spans_junction": whether the candidate spans a junction
+        - "junction_positions": list of junction positions within the candidate
+
+        Parameters
+        ----------
+        candidate : ASOCandidate
+            The candidate to annotate (modified in place).
+        """
+        candidate.features["exon_index"] = self.exon_index(candidate.start)
+        candidate.features["spans_junction"] = self.spans_junction(candidate)
+        candidate.features["junction_positions"] = self.junction_positions(candidate)
+
+
+def annotate_with_exons(
+    candidates: list[ASOCandidate],
+    exon_map: ExonMap,
+) -> None:
+    """Annotate all candidates with exon and junction information.
+
+    Parameters
+    ----------
+    candidates : list[ASOCandidate]
+        Candidates to annotate (modified in place).
+    exon_map : ExonMap
+        Exon boundary map.
+    """
+    junction_count = 0
+    for candidate in candidates:
+        exon_map.annotate_candidate(candidate)
+        if candidate.features.get("spans_junction"):
+            junction_count += 1
+
+    logger.info(
+        "Annotated %d candidates with exon map (%d span junctions)",
+        len(candidates),
+        junction_count,
+    )
