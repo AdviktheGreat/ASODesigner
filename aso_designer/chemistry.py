@@ -391,3 +391,117 @@ def mixmer_from_scheme(
     """
     pattern = parse_mixmer_scheme(scheme)
     return MixmerDesign(pattern=pattern, modification=modification)
+
+
+# ---------------------------------------------------------------------------
+# Chemistry annotation utilities
+# ---------------------------------------------------------------------------
+
+
+def validate_pattern(candidate: ASOCandidate) -> bool:
+    """Validate that a candidate's modification pattern matches its length.
+
+    Parameters
+    ----------
+    candidate : ASOCandidate
+        Candidate with a modification pattern to validate.
+
+    Returns
+    -------
+    bool
+        True if the pattern length matches the sequence length.
+    """
+    if not candidate.modification_pattern:
+        return False
+    return len(candidate.modification_pattern) == candidate.length
+
+
+def get_dna_gap_region(candidate: ASOCandidate) -> tuple[int, int] | None:
+    """Get the (start, end) of the contiguous DNA gap in a candidate.
+
+    For gapmers, this is the DNA center region that recruits RNase H.
+    For mixmers, this is the longest contiguous DNA stretch (if any).
+    For full-modification chemistries, returns None.
+
+    Parameters
+    ----------
+    candidate : ASOCandidate
+        Candidate with a modification pattern.
+
+    Returns
+    -------
+    tuple[int, int] or None
+        (start, end) indices within the ASO sequence, or None if no
+        contiguous DNA gap exists.
+    """
+    if not candidate.modification_pattern:
+        return None
+
+    best_start = None
+    best_len = 0
+    current_start = None
+    current_len = 0
+
+    for i, mod in enumerate(candidate.modification_pattern):
+        if mod == MOD_DNA:
+            if current_start is None:
+                current_start = i
+            current_len += 1
+        else:
+            if current_len > best_len:
+                best_start = current_start
+                best_len = current_len
+            current_start = None
+            current_len = 0
+
+    # Check the last stretch
+    if current_len > best_len:
+        best_start = current_start
+        best_len = current_len
+
+    if best_start is None or best_len == 0:
+        return None
+
+    return (best_start, best_start + best_len)
+
+
+def chemistry_summary(candidate: ASOCandidate) -> str:
+    """Return a human-readable summary of a candidate's chemistry.
+
+    Parameters
+    ----------
+    candidate : ASOCandidate
+        Candidate with a modification pattern.
+
+    Returns
+    -------
+    str
+        Summary string (e.g. "gapmer 5-10-5 (MOE/DNA/MOE), RNase H: yes").
+    """
+    if not candidate.modification_pattern:
+        return f"{candidate.chemistry} (no pattern)"
+
+    # Count modification types
+    mod_counts: dict[str, int] = {}
+    for mod in candidate.modification_pattern:
+        mod_counts[mod] = mod_counts.get(mod, 0) + 1
+
+    parts: list[str] = [candidate.chemistry]
+
+    # For gapmers, show wing-gap-wing layout
+    if candidate.chemistry == "gapmer":
+        gap = get_dna_gap_region(candidate)
+        if gap:
+            wing = candidate.length - (gap[1] - gap[0])
+            wing_each = wing // 2
+            parts.append(f"{wing_each}-{gap[1] - gap[0]}-{wing_each}")
+
+    # Show modification types
+    mod_str = "/".join(f"{k}({v})" for k, v in sorted(mod_counts.items()))
+    parts.append(mod_str)
+
+    # RNase H status
+    rnase_h = candidate.features.get("rnase_h_eligible", False)
+    parts.append(f"RNase H: {'yes' if rnase_h else 'no'}")
+
+    return ", ".join(parts)
