@@ -603,3 +603,220 @@ def calculate_duplex_dg(
         raise ThermodynamicsError(
             f"Unknown duplex method: {method}. Use 'nearest_neighbor' or 'rnaduplex'."
         )
+
+
+# ---------------------------------------------------------------------------
+# Self-structure ΔG computation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SelfStructureResult:
+    """Result of self-structure ΔG computation.
+
+    Attributes
+    ----------
+    sequence : str
+        ASO sequence.
+    dg_self : float
+        Self-folding ΔG in kcal/mol (more negative = more self-structure).
+    structure : str
+        Dot-bracket secondary structure (empty if NN method).
+    method : str
+        Method used: "rnafold" or "nearest_neighbor".
+    penalty : float
+        Self-structure penalty (0.0 if no significant self-structure).
+    """
+
+    sequence: str
+    dg_self: float
+    structure: str
+    method: str
+    penalty: float = 0.0
+
+
+def calculate_self_structure_dg_rnafold(
+    aso_sequence: str,
+) -> SelfStructureResult:
+    """Compute self-structure ΔG using ViennaRNA RNAfold.
+
+    RNAfold computes the MFE secondary structure of the ASO alone.
+    More negative ΔG indicates stronger self-folding, which reduces
+    the effective concentration available for target binding.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA or RNA, T → U conversion applied).
+
+    Returns
+    -------
+    SelfStructureResult
+        Self-structure ΔG and dot-bracket structure.
+
+    Raises
+    ------
+    ThermodynamicsError
+        If RNAfold fails.
+    """
+    from aso_designer.viennarna import run_rnafold
+
+    try:
+        result = run_rnafold(aso_sequence)
+    except Exception as e:
+        raise ThermodynamicsError(f"RNAfold failed for self-structure: {e}") from e
+
+    return SelfStructureResult(
+        sequence=aso_sequence.upper(),
+        dg_self=result.mfe,
+        structure=result.structure,
+        method="rnafold",
+    )
+
+
+def calculate_self_structure_dg_nn(
+    aso_sequence: str,
+    chemistry: str = "gapmer",
+    temperature: float = 37.0,
+) -> SelfStructureResult:
+    """Compute self-structure ΔG using the nearest-neighbor model.
+
+    This computes the ΔG of the ASO folding back on itself (hairpin).
+    For short ASOs (15-25 nt), self-structure is typically minimal, so
+    the NN model provides a quick approximation. For more accurate
+    results, use the RNAfold method.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA alphabet).
+    chemistry : str
+        Chemistry name (determines NN parameter set).
+    temperature : float
+        Temperature in °C (default 37 °C).
+
+    Returns
+    -------
+    SelfStructureResult
+        Self-structure ΔG (NN-based, no structure).
+    """
+    use_rna = chemistry in _RNA_CHEMISTRIES
+    dg = calculate_dg(aso_sequence, temperature=temperature, rna=use_rna)
+    # For NN self-structure, we use a simple heuristic:
+    # self-structure ΔG is a fraction of the total ΔG, since not all
+    # of the ASO can fold back on itself. We use 0.3 as the fraction.
+    # This is a rough approximation; RNAfold is preferred.
+    dg_self = dg * 0.3
+    return SelfStructureResult(
+        sequence=aso_sequence.upper(),
+        dg_self=dg_self,
+        structure="",
+        method="nearest_neighbor",
+    )
+
+
+def calculate_self_structure_penalty(
+    dg_self: float,
+    self_structure_max: float = -3.0,
+) -> float:
+    """Compute a penalty for self-structure.
+
+    The penalty is 0.0 when ΔG ≥ 0 (no self-structure) and increases
+    linearly as ΔG becomes more negative. At the threshold
+    (self_structure_max), the penalty is 1.0.
+
+    Parameters
+    ----------
+    dg_self : float
+        Self-structure ΔG in kcal/mol.
+    self_structure_max : float
+        Threshold ΔG for maximum penalty (default -3.0 kcal/mol).
+
+    Returns
+    -------
+    float
+        Penalty in [0.0, 1.0+]. Values >1.0 indicate ΔG worse than threshold.
+    """
+    if dg_self >= 0:
+        return 0.0
+    if self_structure_max >= 0:
+        return 0.0
+    return abs(dg_self) / abs(self_structure_max)
+
+
+def get_chemistry_self_structure_weight(chemistry: str) -> float:
+    """Get the self-structure weight adjustment for a chemistry.
+
+    Some chemistries (e.g., gapmers with DNA center) are less prone
+    to self-structure issues, while others (e.g., 2'OMe) are more.
+
+    Parameters
+    ----------
+    chemistry : str
+        Chemistry name.
+
+    Returns
+    -------
+    float
+        Weight multiplier (1.0 = default, <1.0 = less sensitive,
+        >1.0 = more sensitive).
+    """
+    import yaml
+
+    preset_path = Path(__file__).parent / "config" / "chemistry_presets.yaml"
+    try:
+        with open(preset_path) as f:
+            presets = yaml.safe_load(f) or {}
+    except Exception:
+        return 1.0
+
+    preset = presets.get(chemistry, {})
+    return preset.get("self_structure_weight_adjust", 1.0)
+
+
+def calculate_self_structure_dg(
+    aso_sequence: str,
+    chemistry: str = "gapmer",
+    method: str = "nearest_neighbor",
+    self_structure_max: float = -3.0,
+    temperature: float = 37.0,
+) -> SelfStructureResult:
+    """Compute self-structure ΔG and penalty with chemistry awareness.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA alphabet).
+    chemistry : str
+        Chemistry name (for weight adjustment and NN parameter selection).
+    method : str
+        "nearest_neighbor" (fast) or "rnafold" (ViennaRNA, accurate).
+    self_structure_max : float
+        Threshold for maximum penalty (default -3.0 kcal/mol).
+    temperature : float
+        Temperature for NN calculation (default 37 °C).
+
+    Returns
+    -------
+    SelfStructureResult
+        Self-structure ΔG, structure, and chemistry-adjusted penalty.
+    """
+    if method == "rnafold":
+        result = calculate_self_structure_dg_rnafold(aso_sequence)
+    elif method == "nearest_neighbor":
+        result = calculate_self_structure_dg_nn(
+            aso_sequence, chemistry=chemistry, temperature=temperature
+        )
+    else:
+        raise ThermodynamicsError(
+            f"Unknown self-structure method: {method}. Use 'nearest_neighbor' or 'rnafold'."
+        )
+
+    # Compute base penalty
+    base_penalty = calculate_self_structure_penalty(result.dg_self, self_structure_max)
+
+    # Apply chemistry-specific weight adjustment
+    weight = get_chemistry_self_structure_weight(chemistry)
+    result.penalty = base_penalty * weight
+
+    return result
