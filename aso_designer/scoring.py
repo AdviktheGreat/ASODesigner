@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from aso_designer.utils.exceptions import ScoringError
 from aso_designer.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -182,3 +183,162 @@ class ScoreComponent(Protocol):
             Sub-score in [0.0, 1.0].
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# Composite score result
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CompositeScore:
+    """Complete scoring result for a single candidate.
+
+    Attributes
+    ----------
+    component_results : list[ScoreResult]
+        Individual component results.
+    composite_score : float
+        Weighted sum of all component scores.
+    chemistry_bonus : float
+        Chemistry-specific bonus added to the composite.
+    final_score : float
+        Composite + chemistry bonus, clamped to [0.0, 1.0].
+    """
+
+    component_results: list[ScoreResult]
+    composite_score: float
+    chemistry_bonus: float
+    final_score: float
+
+
+# ---------------------------------------------------------------------------
+# Score engine
+# ---------------------------------------------------------------------------
+
+
+class ScoreEngine:
+    """Orchestrates multi-factor scoring for ASO candidates.
+
+    Registers score components with their weights, computes
+    sub-scores, and combines them into a weighted composite score
+    with an optional chemistry bonus.
+
+    Parameters
+    ----------
+    weights : dict[str, float]
+        Maps component names to their weights. Weights should
+        sum to 1.0 (validated by config schema).
+    chemistry_bonus : float
+        Bonus added to the composite score (default 0.0).
+    """
+
+    def __init__(
+        self,
+        weights: dict[str, float] | None = None,
+        chemistry_bonus: float = 0.0,
+    ):
+        self._weights = weights or _default_weights()
+        self.chemistry_bonus = chemistry_bonus
+        self._components: dict[str, ScoreComponent] = {}
+
+    @property
+    def weights(self) -> dict[str, float]:
+        return self._weights
+
+    def register_component(self, component: ScoreComponent) -> None:
+        """Register a score component.
+
+        Parameters
+        ----------
+        component : ScoreComponent
+            Component implementing the ScoreComponent protocol.
+
+        Raises
+        ------
+        ScoringError
+            If the component name is not in the weights dict.
+        """
+        if component.name not in self._weights:
+            raise ScoringError(
+                f"Component '{component.name}' has no weight configured. "
+                f"Known weights: {list(self._weights.keys())}"
+            )
+        self._components[component.name] = component
+        logger.debug("Registered score component: %s", component.name)
+
+    def score(self, context: ScoreContext) -> CompositeScore:
+        """Compute the composite score for a candidate.
+
+        Parameters
+        ----------
+        context : ScoreContext
+            Computed features for the candidate.
+
+        Returns
+        -------
+        CompositeScore
+            Complete scoring result with all component scores.
+
+        Raises
+        ------
+        ScoringError
+            If no components are registered.
+        """
+        if not self._components:
+            raise ScoringError("No score components registered")
+
+        results: list[ScoreResult] = []
+        composite = 0.0
+
+        for name, component in self._components.items():
+            weight = self._weights.get(name, 0.0)
+            raw = component.score(context)
+            raw = max(0.0, min(1.0, raw))  # Clamp to [0, 1]
+            weighted = raw * weight
+            composite += weighted
+            results.append(
+                ScoreResult(
+                    component_name=name,
+                    raw_score=raw,
+                    weight=weight,
+                    weighted_score=weighted,
+                )
+            )
+
+        final = max(0.0, min(1.0, composite + self.chemistry_bonus))
+
+        return CompositeScore(
+            component_results=results,
+            composite_score=composite,
+            chemistry_bonus=self.chemistry_bonus,
+            final_score=final,
+        )
+
+    def score_batch(self, contexts: list[ScoreContext]) -> list[CompositeScore]:
+        """Score multiple candidates.
+
+        Parameters
+        ----------
+        contexts : list[ScoreContext]
+            List of candidate contexts.
+
+        Returns
+        -------
+        list[CompositeScore]
+            Scoring results for each candidate.
+        """
+        return [self.score(ctx) for ctx in contexts]
+
+
+def _default_weights() -> dict[str, float]:
+    """Return default scoring weights from config."""
+    return {
+        "accessibility": 0.25,
+        "thermodynamics": 0.20,
+        "gc_content": 0.10,
+        "off_target": 0.20,
+        "variant": 0.10,
+        "self_structure": 0.10,
+        "positional": 0.05,
+    }
