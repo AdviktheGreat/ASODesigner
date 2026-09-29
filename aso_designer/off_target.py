@@ -585,3 +585,165 @@ def summarize_hits(
         hits=off_hits,
         has_on_target=len(on_target_hits) > 0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Off-target scoring
+# ---------------------------------------------------------------------------
+
+# Penalty weights per hit category (relative to max_hits)
+_PERFECT_PENALTY = 1.0
+_SEED_MATCH_PENALTY = 0.5
+_SEED_MISMATCH_PENALTY = 0.25
+
+
+def calculate_off_target_score(
+    result: OffTargetResult,
+    seed_mismatch_weight: float = 2.0,
+    max_hits: int = 50,
+) -> float:
+    """Compute an off-target specificity score in [0.0, 1.0].
+
+    Score = 1.0 - (weighted_hits / max_hits), clamped to [0, 1].
+
+    Weighted hits:
+    - Perfect matches (0 mismatches): weight 1.0
+    - Seed matches (0 seed mm, >0 total mm): weight 0.5 × seed_mismatch_weight
+    - Seed mismatches: weight 0.25
+
+    A score of 1.0 means no off-targets (highly specific).
+    A score of 0.0 means many off-targets (non-specific).
+
+    Parameters
+    ----------
+    result : OffTargetResult
+        Summary of off-target hits for a candidate.
+    seed_mismatch_weight : float
+        Weight for seed-region matches (from config, default 2.0).
+    max_hits : int
+        Maximum hits threshold for normalization (from config, default 50).
+
+    Returns
+    -------
+    float
+        Specificity score in [0.0, 1.0].
+    """
+    weighted = (
+        result.perfect_hits * _PERFECT_PENALTY
+        + result.seed_match_hits * _SEED_MATCH_PENALTY * seed_mismatch_weight
+        + result.seed_mismatch_hits * _SEED_MISMATCH_PENALTY
+    )
+
+    if max_hits <= 0:
+        return 0.0
+
+    score = 1.0 - (weighted / max_hits)
+    return max(0.0, min(1.0, score))
+
+
+def classify_off_target(
+    score: float,
+    specific_threshold: float = 0.8,
+    moderate_threshold: float = 0.3,
+) -> str:
+    """Classify a candidate by off-target specificity.
+
+    Parameters
+    ----------
+    score : float
+        Off-target specificity score (0.0–1.0).
+    specific_threshold : float
+        Scores at or above this are "specific" (default 0.8).
+    moderate_threshold : float
+        Scores at or above this (but below specific_threshold) are
+        "moderate" (default 0.3). Below this is "non-specific".
+
+    Returns
+    -------
+    str
+        One of "specific", "moderate", or "non-specific".
+    """
+    if score >= specific_threshold:
+        return "specific"
+    elif score >= moderate_threshold:
+        return "moderate"
+    else:
+        return "non-specific"
+
+
+def score_off_target(
+    aso_sequence: str,
+    hits: list[OffTargetHit],
+    seed_mismatch_weight: float = 2.0,
+    max_hits: int = 50,
+    exclude_on_target: bool = True,
+) -> tuple[OffTargetResult, float, str]:
+    """Complete off-target analysis: summarize, score, and classify.
+
+    Convenience function that chains summarize_hits → calculate score
+    → classify.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        The ASO sequence.
+    hits : list[OffTargetHit]
+        Raw hits from the search engine.
+    seed_mismatch_weight : float
+        Weight for seed-region matches (default 2.0).
+    max_hits : int
+        Max hits threshold (default 50).
+    exclude_on_target : bool
+        If True, exclude on-target hit from scoring.
+
+    Returns
+    -------
+    tuple[OffTargetResult, float, str]
+        (Summary, score, classification)
+    """
+    result = summarize_hits(aso_sequence, hits, exclude_on_target=exclude_on_target)
+    score = calculate_off_target_score(
+        result, seed_mismatch_weight=seed_mismatch_weight, max_hits=max_hits
+    )
+    classification = classify_off_target(score)
+    return result, score, classification
+
+
+def score_off_target_batch(
+    aso_sequences: list[str],
+    all_hits: dict[int, list[OffTargetHit]],
+    seed_mismatch_weight: float = 2.0,
+    max_hits: int = 50,
+    exclude_on_target: bool = True,
+) -> dict[int, tuple[OffTargetResult, float, str]]:
+    """Score off-targets for multiple ASO candidates.
+
+    Parameters
+    ----------
+    aso_sequences : list[str]
+        List of ASO sequences.
+    all_hits : dict[int, list[OffTargetHit]]
+        Maps ASO index to its hits (from search_batch).
+    seed_mismatch_weight : float
+        Weight for seed-region matches.
+    max_hits : int
+        Max hits threshold.
+    exclude_on_target : bool
+        If True, exclude on-target hits.
+
+    Returns
+    -------
+    dict[int, tuple[OffTargetResult, float, str]]
+        Maps ASO index to (summary, score, classification).
+    """
+    results: dict[int, tuple[OffTargetResult, float, str]] = {}
+    for i, seq in enumerate(aso_sequences):
+        hits = all_hits.get(i, [])
+        results[i] = score_off_target(
+            seq,
+            hits,
+            seed_mismatch_weight=seed_mismatch_weight,
+            max_hits=max_hits,
+            exclude_on_target=exclude_on_target,
+        )
+    return results
