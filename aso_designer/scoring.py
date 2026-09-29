@@ -342,3 +342,61 @@ def _default_weights() -> dict[str, float]:
         "self_structure": 0.10,
         "positional": 0.05,
     }
+
+
+# ---------------------------------------------------------------------------
+# Candidate score: combines composite score with candidate metadata
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CandidateScore:
+    """A scored ASO candidate with ranking metadata.
+
+    Attributes
+    ----------
+    sequence : str
+        ASO sequence.
+    start : int
+        Start position on the transcript (0-based).
+    end : int
+        End position on the transcript (0-based, exclusive).
+    chemistry : str
+        Chemistry type.
+    composite_score : CompositeScore
+        Full scoring breakdown.
+    final_score : float
+        Final score (composite + chemistry bonus), [0.0, 1.0].
+    rank : int | None
+        Rank among all candidates (1 = best). None until ranked.
+    """
+
+    sequence: str
+    start: int
+    end: int
+    chemistry: str
+    composite_score: CompositeScore
+    final_score: float
+    rank: int | None = None
+
+    @property
+    def component_scores(self) -> dict[str, float]:
+        """Map component name → raw score."""
+        return {r.component_name: r.raw_score for r in self.composite_score.component_results}
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for reporting."""
+        return {
+            "sequence": self.sequence,
+            "start": self.start,
+            "end": self.end,
+            "chemistry": self.chemistry,
+            "final_score": round(self.final_score, 4),
+            "rank": self.rank,
+            "component_scores": {
+                r.component_name: round(r.raw_score, 4)
+                for r in self.composite_score.component_results
+            },
+            "composite_score": round(self.composite_score.composite_score, 4),
+            "chemistry_bonus": self.composite_score.chemistry_bonus,
+        }
