@@ -820,3 +820,341 @@ def calculate_self_structure_dg(
     result.penalty = base_penalty * weight
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Target structure ΔG and net binding energy
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TargetStructureResult:
+    """Result of target structure ΔG computation at a binding site.
+
+    Attributes
+    ----------
+    target_sequence : str
+        Target subsequence at the binding site.
+    dg_target : float
+        Target folding ΔG in kcal/mol (more negative = more structured).
+    structure : str
+        Dot-bracket secondary structure (empty if NN method).
+    method : str
+        Method used: "rnafold" or "nearest_neighbor".
+    """
+
+    target_sequence: str
+    dg_target: float
+    structure: str
+    method: str
+
+
+def calculate_target_structure_dg_rnafold(
+    target_sequence: str,
+) -> TargetStructureResult:
+    """Compute target structure ΔG at a binding site using RNAfold.
+
+    The target subsequence at the ASO binding site may have local
+    secondary structure that must be opened for ASO binding. RNAfold
+    computes the MFE of this subsequence.
+
+    Parameters
+    ----------
+    target_sequence : str
+        Target subsequence at the binding site (DNA or RNA).
+
+    Returns
+    -------
+    TargetStructureResult
+        Target structure ΔG and dot-bracket structure.
+    """
+    from aso_designer.viennarna import run_rnafold
+
+    try:
+        result = run_rnafold(target_sequence)
+    except Exception as e:
+        raise ThermodynamicsError(f"RNAfold failed for target structure: {e}") from e
+
+    return TargetStructureResult(
+        target_sequence=target_sequence.upper(),
+        dg_target=result.mfe,
+        structure=result.structure,
+        method="rnafold",
+    )
+
+
+def calculate_target_structure_dg_nn(
+    target_sequence: str,
+    temperature: float = 37.0,
+) -> TargetStructureResult:
+    """Compute target structure ΔG using the NN model.
+
+    Uses RNA NN parameters since the target is mRNA.
+
+    Parameters
+    ----------
+    target_sequence : str
+        Target subsequence (DNA alphabet, converted to RNA internally).
+    temperature : float
+        Temperature in °C (default 37 °C).
+
+    Returns
+    -------
+    TargetStructureResult
+        Target structure ΔG (NN-based).
+    """
+    dg = calculate_dg(target_sequence, temperature=temperature, rna=True)
+    return TargetStructureResult(
+        target_sequence=target_sequence.upper(),
+        dg_target=dg,
+        structure="",
+        method="nearest_neighbor",
+    )
+
+
+def calculate_target_structure_dg(
+    target_sequence: str,
+    method: str = "nearest_neighbor",
+    temperature: float = 37.0,
+) -> TargetStructureResult:
+    """Compute target structure ΔG using the specified method.
+
+    Parameters
+    ----------
+    target_sequence : str
+        Target subsequence at the binding site.
+    method : str
+        "nearest_neighbor" (fast) or "rnafold" (ViennaRNA, accurate).
+    temperature : float
+        Temperature for NN calculation (default 37 °C).
+
+    Returns
+    -------
+    TargetStructureResult
+        Target structure ΔG result.
+    """
+    if method == "rnafold":
+        return calculate_target_structure_dg_rnafold(target_sequence)
+    elif method == "nearest_neighbor":
+        return calculate_target_structure_dg_nn(target_sequence, temperature=temperature)
+    else:
+        raise ThermodynamicsError(
+            f"Unknown target structure method: {method}. Use 'nearest_neighbor' or 'rnafold'."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Net binding energy
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ThermodynamicSummary:
+    """Complete thermodynamic profile of an ASO candidate.
+
+    Combines Tm, duplex ΔG, self-structure ΔG, target structure ΔG,
+    and net binding energy into a single summary object.
+
+    Attributes
+    ----------
+    tm : float
+        Melting temperature in °C.
+    tm_score : float
+        Tm score (0–1, 1 = optimal).
+    dg_duplex : float
+        Duplex formation ΔG in kcal/mol.
+    dg_self : float
+        Self-structure ΔG in kcal/mol.
+    self_structure_penalty : float
+        Chemistry-adjusted self-structure penalty.
+    dg_target : float
+        Target structure ΔG at binding site in kcal/mol.
+    dg_net : float
+        Net binding ΔG = ΔG_duplex - ΔG_self - ΔG_target.
+    binding_class : str
+        Binding strength classification: "strong", "moderate", or "weak".
+    """
+
+    tm: float
+    tm_score: float
+    dg_duplex: float
+    dg_self: float
+    self_structure_penalty: float
+    dg_target: float
+    dg_net: float
+    binding_class: str
+
+
+def calculate_net_binding_dg(
+    dg_duplex: float,
+    dg_self: float,
+    dg_target: float,
+) -> float:
+    """Compute net binding ΔG from component energies.
+
+    The thermodynamic cycle for ASO binding:
+    1. ASO unfolds (cost: -ΔG_self, since ΔG_self is negative)
+    2. Target opens at binding site (cost: -ΔG_target)
+    3. ASO:target duplex forms (gain: ΔG_duplex)
+
+    ΔG_net = ΔG_duplex - ΔG_self - ΔG_target
+
+    More negative ΔG_net = more favorable binding.
+
+    Parameters
+    ----------
+    dg_duplex : float
+        Duplex formation ΔG (negative = favorable).
+    dg_self : float
+        Self-structure ΔG (negative = more self-structure).
+    dg_target : float
+        Target structure ΔG (negative = more structured target).
+
+    Returns
+    -------
+    float
+        Net binding ΔG in kcal/mol.
+    """
+    return dg_duplex - dg_self - dg_target
+
+
+def classify_binding(
+    dg_net: float,
+    strong_threshold: float = -10.0,
+    moderate_threshold: float = -5.0,
+) -> str:
+    """Classify binding strength by net binding ΔG.
+
+    Parameters
+    ----------
+    dg_net : float
+        Net binding ΔG in kcal/mol.
+    strong_threshold : float
+        ΔG at or below this is "strong" (default -10.0 kcal/mol).
+    moderate_threshold : float
+        ΔG at or below this (but above strong_threshold) is "moderate"
+        (default -5.0 kcal/mol). Above this is "weak".
+
+    Returns
+    -------
+    str
+        One of "strong", "moderate", or "weak".
+    """
+    if dg_net <= strong_threshold:
+        return "strong"
+    elif dg_net <= moderate_threshold:
+        return "moderate"
+    else:
+        return "weak"
+
+
+def compute_thermodynamic_summary(
+    aso_sequence: str,
+    target_sequence: str | None = None,
+    chemistry: str = "gapmer",
+    na_conc: float = 0.1,
+    oligo_conc: float = 1.0e-6,
+    tm_optimal: float = 52.0,
+    tm_min: float = 40.0,
+    tm_max: float = 65.0,
+    self_structure_max: float = -3.0,
+    method: str = "nearest_neighbor",
+    temperature: float = 37.0,
+) -> ThermodynamicSummary:
+    """Compute a complete thermodynamic summary for an ASO candidate.
+
+    Combines Tm, duplex ΔG, self-structure ΔG, target structure ΔG,
+    and net binding energy into a single summary.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA alphabet).
+    target_sequence : str or None
+        Target subsequence at binding site. Required for "rnaduplex"
+        duplex method and "rnafold" target method.
+    chemistry : str
+        Chemistry name (default "gapmer").
+    na_conc : float
+        Sodium concentration in M (default 0.1).
+    oligo_conc : float
+        Oligo concentration in M (default 1 µM).
+    tm_optimal : float
+        Optimal Tm in °C (default 52.0).
+    tm_min : float
+        Minimum acceptable Tm (default 40.0).
+    tm_max : float
+        Maximum acceptable Tm (default 65.0).
+    self_structure_max : float
+        Self-structure threshold (default -3.0 kcal/mol).
+    method : str
+        Computation method: "nearest_neighbor" (fast) or
+        "rnafold"/"rnaduplex" (ViennaRNA, accurate).
+    temperature : float
+        Temperature for ΔG calculations (default 37 °C).
+
+    Returns
+    -------
+    ThermodynamicSummary
+        Complete thermodynamic profile.
+    """
+    # Tm
+    tm = calculate_tm_with_chemistry(
+        aso_sequence, chemistry=chemistry, na_conc=na_conc, oligo_conc=oligo_conc
+    )
+    tm_score = score_tm(tm, tm_optimal=tm_optimal, tm_min=tm_min, tm_max=tm_max)
+
+    # Duplex ΔG
+    if method == "rnaduplex" and target_sequence is not None:
+        duplex = calculate_duplex_dg(
+            aso_sequence, target_sequence, chemistry=chemistry, method="rnaduplex"
+        )
+    else:
+        duplex = calculate_duplex_dg(
+            aso_sequence,
+            chemistry=chemistry,
+            method="nearest_neighbor",
+            temperature=temperature,
+        )
+
+    # Self-structure ΔG
+    self_struct = calculate_self_structure_dg(
+        aso_sequence,
+        chemistry=chemistry,
+        method=method if method != "rnaduplex" else "rnafold",
+        self_structure_max=self_structure_max,
+        temperature=temperature,
+    )
+
+    # Target structure ΔG
+    if target_sequence is not None:
+        target_struct = calculate_target_structure_dg(
+            target_sequence,
+            method=method if method != "rnaduplex" else "rnafold",
+            temperature=temperature,
+        )
+        dg_target = target_struct.dg_target
+    else:
+        # Without target sequence, assume no target structure cost
+        dg_target = 0.0
+
+    # Net binding energy
+    dg_net = calculate_net_binding_dg(
+        dg_duplex=duplex.dg_duplex,
+        dg_self=self_struct.dg_self,
+        dg_target=dg_target,
+    )
+
+    # Classify binding
+    binding_class = classify_binding(dg_net)
+
+    return ThermodynamicSummary(
+        tm=tm,
+        tm_score=tm_score,
+        dg_duplex=duplex.dg_duplex,
+        dg_self=self_struct.dg_self,
+        self_structure_penalty=self_struct.penalty,
+        dg_target=dg_target,
+        dg_net=dg_net,
+        binding_class=binding_class,
+    )
