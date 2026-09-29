@@ -812,3 +812,154 @@ def _deduplicate_variant_set(
     for v in seen.values():
         result.add_variant(v)
     return result
+
+
+# ---------------------------------------------------------------------------
+# VCF parser
+# ---------------------------------------------------------------------------
+
+
+def parse_vcf(file_path: str) -> list[Variant]:
+    """Parse a VCF file and return a list of Variant objects.
+
+    Handles standard VCF 4.x format:
+    - Header lines (##) with metadata
+    - Column header line (#CHROM POS ID REF ALT QUAL FILTER INFO)
+    - Data lines with tab-separated fields
+    - INFO field parsing for AF (allele frequency), CLNSIG (clinical
+      significance), and other relevant annotations
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the VCF file.
+
+    Returns
+    -------
+    list[Variant]
+        Parsed variants.
+
+    Raises
+    ------
+    VariantError
+        If the file cannot be read or is not valid VCF.
+    """
+    from pathlib import Path
+
+    path = Path(file_path)
+    if not path.exists():
+        raise VariantError(f"VCF file not found: {path}")
+
+    variants: list[Variant] = []
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith("##"):
+                    continue  # Metadata line
+                if line.startswith("#CHROM"):
+                    continue  # Column header
+
+                # Parse data line
+                fields = line.split("\t")
+                if len(fields) < 8:
+                    logger.warning("Skipping malformed VCF line: %s", line[:80])
+                    continue
+
+                chrom = fields[0]
+                # Normalize chromosome (strip "chr" prefix for consistency)
+                chrom = chrom.replace("chr", "")
+                pos = int(fields[1])
+                rs_id = fields[2] if fields[2] != "." else ""
+                ref = fields[3]
+                alt = fields[4]
+                info_str = fields[7]
+
+                # Parse INFO field
+                info = _parse_info_field(info_str)
+                maf = _extract_maf_from_info(info)
+                clinical_sig = _extract_clinical_from_info(info)
+                variant_type = _classify_vcf_variant_type(ref, alt)
+
+                variants.append(
+                    Variant(
+                        chrom=chrom,
+                        pos=pos,
+                        ref=ref,
+                        alt=alt,
+                        rs_id=rs_id,
+                        maf=maf,
+                        variant_type=variant_type,
+                        clinical_significance=clinical_sig,
+                    )
+                )
+
+    except OSError as e:
+        raise VariantError(f"Failed to read VCF file {path}: {e}") from e
+
+    logger.info("Parsed %d variants from VCF: %s", len(variants), path)
+    return variants
+
+
+def _parse_info_field(info_str: str) -> dict[str, str]:
+    """Parse a VCF INFO field into a dictionary.
+
+    INFO format: key1=value1;key2=value2;key3
+    """
+    result: dict[str, str] = {}
+    if not info_str or info_str == ".":
+        return result
+    for item in info_str.split(";"):
+        if "=" in item:
+            key, value = item.split("=", 1)
+            result[key] = value
+        else:
+            result[item] = "true"
+    return result
+
+
+def _extract_maf_from_info(info: dict[str, str]) -> float:
+    """Extract MAF from VCF INFO field.
+
+    Looks for AF (allele frequency) or MAF keys.
+    """
+    for key in ("AF", "MAF", "GMAF"):
+        if key in info:
+            try:
+                return float(info[key])
+            except ValueError:
+                continue
+    return -1.0
+
+
+def _extract_clinical_from_info(info: dict[str, str]) -> str:
+    """Extract clinical significance from VCF INFO field.
+
+    Looks for CLNSIG (ClinVar) or CLNSIGCONF.
+    """
+    for key in ("CLNSIG", "CLNSIGCONF", "ClinicalSignificance"):
+        if key in info:
+            return _normalize_clinical_significance(info[key])
+    return ""
+
+
+def _classify_vcf_variant_type(ref: str, alt: str) -> str:
+    """Classify variant type from REF and ALT alleles.
+
+    - SNV: single nucleotide change (both ref and alt are single bases)
+    - Indel: insertion or deletion
+    - MNV: multi-nucleotide change
+    """
+    # Multi-allelic (comma-separated alt)
+    if "," in alt:
+        return "mnv"
+    if len(ref) == 1 and len(alt) == 1:
+        return "snv"
+    if len(ref) != len(alt):
+        return "indel"
+    if len(ref) > 1 and len(alt) > 1:
+        return "mnv"
+    return "unknown"
