@@ -436,3 +436,152 @@ class OffTargetSearchEngine:
                 on_target_position=on_target_positions[i],
             )
         return results
+
+
+# ---------------------------------------------------------------------------
+# Result processing
+# ---------------------------------------------------------------------------
+
+
+def classify_hit(hit: OffTargetHit) -> str:
+    """Classify an off-target hit by mismatch profile.
+
+    Categories:
+    - "perfect": 0 mismatches (exact match)
+    - "seed_match": 0 seed mismatches, >0 total mismatches
+    - "seed_mismatch": seed mismatches > 0
+    - "on_target": the intended target site
+
+    Parameters
+    ----------
+    hit : OffTargetHit
+        The hit to classify.
+
+    Returns
+    -------
+    str
+        Classification label.
+    """
+    if hit.is_on_target:
+        return "on_target"
+    if hit.mismatches == 0:
+        return "perfect"
+    if hit.seed_mismatches == 0:
+        return "seed_match"
+    return "seed_mismatch"
+
+
+def filter_hits(
+    hits: list[OffTargetHit],
+    max_mismatches: int = 3,
+    max_seed_mismatches: int | None = None,
+    exclude_on_target: bool = True,
+) -> list[OffTargetHit]:
+    """Filter off-target hits by mismatch criteria.
+
+    Parameters
+    ----------
+    hits : list[OffTargetHit]
+        Raw hits from the search engine.
+    max_mismatches : int
+        Maximum total mismatches (default 3).
+    max_seed_mismatches : int or None
+        Maximum seed mismatches (None = no seed filter).
+    exclude_on_target : bool
+        If True, exclude the on-target hit from results.
+
+    Returns
+    -------
+    list[OffTargetHit]
+        Filtered hits.
+    """
+    filtered = []
+    for hit in hits:
+        if exclude_on_target and hit.is_on_target:
+            continue
+        if hit.mismatches > max_mismatches:
+            continue
+        if max_seed_mismatches is not None and hit.seed_mismatches > max_seed_mismatches:
+            continue
+        filtered.append(hit)
+    return filtered
+
+
+@dataclass
+class OffTargetResult:
+    """Summary of off-target analysis for a single ASO candidate.
+
+    Attributes
+    ----------
+    aso_sequence : str
+        The ASO sequence.
+    total_hits : int
+        Total number of hits (including on-target).
+    off_target_hits : int
+        Number of off-target hits (excluding on-target).
+    perfect_hits : int
+        Off-target hits with 0 mismatches.
+    seed_match_hits : int
+        Off-target hits with 0 seed mismatches but >0 total mismatches.
+    seed_mismatch_hits : int
+        Off-target hits with seed mismatches.
+    min_mismatches : int
+        Minimum mismatches among off-target hits.
+    hits : list[OffTargetHit]
+        All off-target hits (excluding on-target).
+    has_on_target : bool
+        Whether the on-target site was found.
+    """
+
+    aso_sequence: str
+    total_hits: int
+    off_target_hits: int
+    perfect_hits: int
+    seed_match_hits: int
+    seed_mismatch_hits: int
+    min_mismatches: int
+    hits: list[OffTargetHit]
+    has_on_target: bool
+
+
+def summarize_hits(
+    aso_sequence: str,
+    hits: list[OffTargetHit],
+    exclude_on_target: bool = True,
+) -> OffTargetResult:
+    """Summarize off-target hits for an ASO candidate.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        The ASO sequence.
+    hits : list[OffTargetHit]
+        All hits from the search engine.
+    exclude_on_target : bool
+        If True, exclude the on-target hit from the summary.
+
+    Returns
+    -------
+    OffTargetResult
+        Summary of the off-target profile.
+    """
+    off_hits = filter_hits(hits, exclude_on_target=exclude_on_target)
+    on_target_hits = [h for h in hits if h.is_on_target]
+
+    perfect = sum(1 for h in off_hits if h.mismatches == 0)
+    seed_match = sum(1 for h in off_hits if h.mismatches > 0 and h.seed_mismatches == 0)
+    seed_mismatch = sum(1 for h in off_hits if h.seed_mismatches > 0)
+
+    min_mm = min((h.mismatches for h in off_hits), default=-1)
+
+    return OffTargetResult(
+        aso_sequence=aso_sequence,
+        total_hits=len(hits),
+        off_target_hits=len(off_hits),
+        perfect_hits=perfect,
+        seed_match_hits=seed_match,
+        seed_mismatch_hits=seed_mismatch,
+        min_mismatches=min_mm,
+        hits=off_hits,
+        has_on_target=len(on_target_hits) > 0,
+    )
