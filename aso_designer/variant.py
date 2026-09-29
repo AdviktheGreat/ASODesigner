@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from aso_designer.utils.exceptions import VariantError
 from aso_designer.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -218,3 +219,226 @@ class VariantSet:
             "with_maf": sum(1 for v in self._variants if v.has_maf),
             "chromosomes": len(self._chrom_pos),
         }
+
+
+# ---------------------------------------------------------------------------
+# dbSNP API client
+# ---------------------------------------------------------------------------
+
+# NCBI E-utilities base URL
+_EUTILS_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+
+class DbSNPClient:
+    """Client for fetching variant data from NCBI dbSNP via E-utilities.
+
+    Uses NCBI ESearch and ESummary to find variants by gene name
+    or genomic region. Inspired by GuideX's EntrezFetcher but
+    redesigned for variant-specific queries.
+
+    Parameters
+    ----------
+    email : str
+        Email for NCBI API identification (required by NCBI).
+    api_key : str, optional
+        NCBI API key for higher rate limits.
+    rate_limit : float
+        Minimum seconds between requests (default 0.34 with API key,
+        0.55 without).
+    """
+
+    def __init__(
+        self,
+        email: str = "",
+        api_key: str | None = None,
+        rate_limit: float | None = None,
+    ):
+        self.email = email
+        self.api_key = api_key
+        self.rate_limit = rate_limit or (0.1 if api_key else 0.34)
+        self._last_request_time: float = 0.0
+
+    def fetch_variants_by_gene(
+        self,
+        gene_name: str,
+        organism: str = "Homo sapiens",
+        max_results: int = 500,
+    ) -> list[Variant]:
+        """Fetch variants associated with a gene from dbSNP.
+
+        Parameters
+        ----------
+        gene_name : str
+            Gene symbol (e.g., "DMD").
+        organism : str
+            Organism name (default "Homo sapiens").
+        max_results : int
+            Maximum number of variants to fetch (default 500).
+
+        Returns
+        -------
+        list[Variant]
+            Variants from dbSNP.
+
+        Raises
+        ------
+        VariantError
+            If the API request fails.
+        """
+        import time
+        import urllib.parse
+        import urllib.request
+
+        # Rate limiting
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.rate_limit:
+            time.sleep(self.rate_limit - elapsed)
+
+        # ESearch: find dbSNP records for the gene
+        search_term = f"{gene_name}[Gene] AND {organism}[Organism] AND snp[SNP]"
+        params = {
+            "db": "snp",
+            "term": search_term,
+            "retmax": str(max_results),
+            "retmode": "json",
+        }
+        if self.email:
+            params["email"] = self.email
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        url = f"{_EUTILS_URL}/esearch.fcgi?" + urllib.parse.urlencode(params)
+
+        try:
+            self._last_request_time = time.time()
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                import json
+
+                data = json.loads(resp.read().decode())
+        except Exception as e:
+            raise VariantError(f"dbSNP ESearch failed for gene {gene_name}: {e}") from e
+
+        ids = data.get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            logger.info("No dbSNP variants found for gene %s", gene_name)
+            return []
+
+        # ESummary: fetch variant details
+        variants = self._fetch_summaries(ids)
+        logger.info("Fetched %d dbSNP variants for gene %s", len(variants), gene_name)
+        return variants
+
+    def _fetch_summaries(self, ids: list[str]) -> list[Variant]:
+        """Fetch variant summaries from ESummary."""
+        import json
+        import time
+        import urllib.parse
+        import urllib.request
+
+        # Rate limiting
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.rate_limit:
+            time.sleep(self.rate_limit - elapsed)
+
+        params = {
+            "db": "snp",
+            "id": ",".join(ids),
+            "retmode": "json",
+        }
+        if self.email:
+            params["email"] = self.email
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        url = f"{_EUTILS_URL}/esummary.fcgi?" + urllib.parse.urlencode(params)
+
+        try:
+            self._last_request_time = time.time()
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as e:
+            raise VariantError(f"dbSNP ESummary failed: {e}") from e
+
+        result_list = data.get("result", [])
+        variants: list[Variant] = []
+
+        for item in result_list:
+            if not isinstance(item, dict):
+                continue
+            uid = item.get("uid", "")
+            if not uid:
+                continue
+
+            # Parse variant fields from ESummary
+            chrom = item.get("chrname", "")
+            pos_str = item.get("chrpos", "")
+            pos = int(pos_str) if pos_str else 0
+            rs_id = f"rs{uid}"
+            ref_alt = item.get("spdi", "")
+            maf = _parse_maf_from_summary(item)
+            variant_type = _classify_variant_type(item.get("snp_class", ""))
+            clinical = item.get("clinical_significance", "")
+
+            if chrom and pos:
+                ref, alt = _parse_spdi(ref_alt)
+                variants.append(
+                    Variant(
+                        chrom=chrom,
+                        pos=pos,
+                        ref=ref,
+                        alt=alt,
+                        rs_id=rs_id,
+                        maf=maf,
+                        variant_type=variant_type,
+                        clinical_significance=clinical,
+                        gene=item.get("gene_name", ""),
+                    )
+                )
+
+        return variants
+
+
+def _parse_maf_from_summary(item: dict) -> float:
+    """Extract MAF from dbSNP ESummary item."""
+    global_maf = item.get("global_maf", "")
+    if global_maf:
+        try:
+            # MAF is often in format "A/G:0.05"
+            parts = global_maf.split(":")
+            if len(parts) >= 2:
+                return float(parts[-1])
+        except (ValueError, IndexError):
+            pass
+    return -1.0
+
+
+def _classify_variant_type(snp_class: str) -> str:
+    """Classify variant type from dbSNP snp_class string."""
+    snp_class_lower = snp_class.lower()
+    if "snv" in snp_class_lower or "snp" in snp_class_lower:
+        return "snv"
+    if (
+        "indel" in snp_class_lower
+        or "deletion" in snp_class_lower
+        or "insertion" in snp_class_lower
+    ):
+        return "indel"
+    if "mnv" in snp_class_lower or "mnp" in snp_class_lower:
+        return "mnv"
+    return "unknown"
+
+
+def _parse_spdi(spdi: str) -> tuple[str, str]:
+    """Parse SPDI notation into ref and alt alleles.
+
+    SPDI format: NC_000001.1:100:A:G
+    Returns (ref, alt) = ("A", "G").
+    """
+    if not spdi:
+        return "", ""
+    parts = spdi.split(":")
+    if len(parts) >= 4:
+        return parts[-2], parts[-1]
+    return "", ""
