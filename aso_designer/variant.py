@@ -662,3 +662,153 @@ def _parse_clinvar_alleles(alleles: str) -> tuple[str, str]:
         alt = parts[1] if len(parts) > 1 else ""
         return ref, alt
     return "", ""
+
+
+# ---------------------------------------------------------------------------
+# Variant fetch manager (API → VCF fallback)
+# ---------------------------------------------------------------------------
+
+
+class VariantFetchManager:
+    """Orchestrates variant fetching from multiple sources.
+
+    Tries dbSNP and ClinVar APIs first, then falls back to a
+    local VCF file if provided. Merges results into a single
+    VariantSet, deduplicating by (chrom, pos, ref, alt).
+
+    Parameters
+    ----------
+    email : str
+        Email for NCBI API identification.
+    api_key : str, optional
+        NCBI API key.
+    vcf_path : str or Path, optional
+        Path to a local VCF file for fallback.
+    """
+
+    def __init__(
+        self,
+        email: str = "",
+        api_key: str | None = None,
+        vcf_path: str | None = None,
+    ):
+        self.dbsnp = DbSNPClient(email=email, api_key=api_key)
+        self.clinvar = ClinVarClient(email=email, api_key=api_key)
+        self.vcf_path = vcf_path
+
+    def fetch_variants(
+        self,
+        gene_name: str,
+        organism: str = "Homo sapiens",
+        max_results: int = 500,
+        use_clinvar: bool = True,
+    ) -> VariantSet:
+        """Fetch variants for a gene from all available sources.
+
+        Parameters
+        ----------
+        gene_name : str
+            Gene symbol.
+        organism : str
+            Organism name.
+        max_results : int
+            Max variants per source.
+        use_clinvar : bool
+            Whether to query ClinVar (default True).
+
+        Returns
+        -------
+        VariantSet
+            Merged variant set from all sources.
+        """
+        variant_set = VariantSet()
+
+        # 1. dbSNP API
+        try:
+            dbsnp_variants = self.dbsnp.fetch_variants_by_gene(
+                gene_name, organism=organism, max_results=max_results
+            )
+            variant_set.add_variants(dbsnp_variants)
+            logger.info("dbSNP: %d variants for %s", len(dbsnp_variants), gene_name)
+        except VariantError as e:
+            logger.warning("dbSNP fetch failed: %s", e)
+
+        # 2. ClinVar API
+        if use_clinvar:
+            try:
+                clinvar_variants = self.clinvar.fetch_pathogenic_variants(
+                    gene_name, organism=organism, max_results=max_results
+                )
+                variant_set.add_variants(clinvar_variants)
+                logger.info(
+                    "ClinVar: %d variants for %s",
+                    len(clinvar_variants),
+                    gene_name,
+                )
+            except VariantError as e:
+                logger.warning("ClinVar fetch failed: %s", e)
+
+        # 3. VCF fallback (if API returned nothing or VCF is provided)
+        if self.vcf_path and variant_set.num_variants == 0:
+            try:
+                vcf_variants = _load_vcf_fallback(self.vcf_path)
+                variant_set.add_variants(vcf_variants)
+                logger.info(
+                    "VCF fallback: %d variants from %s",
+                    len(vcf_variants),
+                    self.vcf_path,
+                )
+            except VariantError as e:
+                logger.warning("VCF fallback failed: %s", e)
+
+        # Deduplicate
+        variant_set = _deduplicate_variant_set(variant_set)
+
+        logger.info(
+            "Total unique variants for %s: %d",
+            gene_name,
+            variant_set.num_variants,
+        )
+        return variant_set
+
+
+def _load_vcf_fallback(vcf_path: str) -> list[Variant]:
+    """Load variants from a VCF file (fallback).
+
+    This is a placeholder that will be fully implemented in Step 29
+    when the VCF parser is added. For now, it raises an error.
+    """
+    raise VariantError(
+        f"VCF fallback not yet implemented: {vcf_path}. Use the VCF parser from Step 29."
+    )
+
+
+def _deduplicate_variant_set(
+    variant_set: VariantSet,
+) -> VariantSet:
+    """Deduplicate variants by (chrom, pos, ref, alt).
+
+    Keeps the first occurrence of each unique variant, preferring
+    variants with more complete information (MAF, clinical significance).
+    """
+    seen: dict[tuple[str, int, str, str], Variant] = {}
+
+    for v in variant_set.variants:
+        key = (v.chrom, v.pos, v.ref, v.alt)
+        if key not in seen:
+            seen[key] = v
+        else:
+            # Merge: keep the one with more complete data
+            existing = seen[key]
+            if v.has_maf and not existing.has_maf:
+                existing = v
+            if v.clinical_significance and not existing.clinical_significance:
+                existing.clinical_significance = v.clinical_significance
+            if v.rs_id and not existing.rs_id:
+                existing.rs_id = v.rs_id
+            seen[key] = existing
+
+    result = VariantSet()
+    for v in seen.values():
+        result.add_variant(v)
+    return result
