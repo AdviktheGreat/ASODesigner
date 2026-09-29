@@ -1040,3 +1040,217 @@ def load_vcf_filtered(
         pathogenic_only,
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Variant-aware annotation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class VariantAnnotation:
+    """Result of variant annotation for an ASO candidate.
+
+    Attributes
+    ----------
+    aso_start : int
+        ASO start position (0-based, transcript coordinates).
+    aso_end : int
+        ASO end position (0-based, exclusive, transcript coordinates).
+    total_variants : int
+        Total variants overlapping the ASO binding site.
+    seed_variants : int
+        Variants in the seed region.
+    non_seed_variants : int
+        Variants outside the seed region.
+    pathogenic_variants : int
+        Pathogenic variants in the binding site.
+    has_pathogenic : bool
+        Whether any pathogenic variant overlaps.
+    penalty : float
+        Computed variant penalty (0.0 = no penalty).
+    variants : list[Variant]
+        All overlapping variant objects.
+    """
+
+    aso_start: int
+    aso_end: int
+    total_variants: int
+    seed_variants: int
+    non_seed_variants: int
+    pathogenic_variants: int
+    has_pathogenic: bool
+    penalty: float
+    variants: list[Variant]
+
+
+class VariantAnnotator:
+    """Annotates ASO candidates with overlapping variant information.
+
+    Checks for variants in the ASO binding site, classifies them by
+    seed/non-seed region, and computes a variant-aware penalty.
+
+    Parameters
+    ----------
+    variant_set : VariantSet
+        The set of variants to check against.
+    seed_start : int
+        Seed region start position in the ASO (0-based, default 2).
+    seed_end : int
+        Seed region end position in the ASO (exclusive, default 8).
+    maf_threshold : float
+        Minimum MAF to consider a variant (default 0.01).
+    seed_region_multiplier : float
+        Penalty multiplier for seed-region variants (default 3.0).
+    flag_pathogenic : bool
+        Whether to flag pathogenic variants (default True).
+    """
+
+    def __init__(
+        self,
+        variant_set: VariantSet,
+        seed_start: int = 2,
+        seed_end: int = 8,
+        maf_threshold: float = 0.01,
+        seed_region_multiplier: float = 3.0,
+        flag_pathogenic: bool = True,
+    ):
+        self.variant_set = variant_set
+        self.seed_start = seed_start
+        self.seed_end = seed_end
+        self.maf_threshold = maf_threshold
+        self.seed_region_multiplier = seed_region_multiplier
+        self.flag_pathogenic = flag_pathogenic
+
+    def annotate(
+        self,
+        aso_start: int,
+        aso_end: int,
+        chrom: str = "",
+    ) -> VariantAnnotation:
+        """Annotate an ASO binding site with overlapping variants.
+
+        Parameters
+        ----------
+        aso_start : int
+            ASO start position (0-based, transcript or genomic coordinates).
+        aso_end : int
+            ASO end position (0-based, exclusive).
+        chrom : str
+            Chromosome (if using genomic coordinates). Empty for
+            transcript coordinates (searches all chromosomes).
+
+        Returns
+        -------
+        VariantAnnotation
+            Annotation result with variant counts and penalty.
+        """
+        # Convert to 1-based inclusive range for variant lookup
+        # ASO positions are 0-based [start, end), variants are 1-based
+        genomic_start = aso_start + 1
+        genomic_end = aso_end
+
+        # Get overlapping variants
+        if chrom:
+            overlapping = self.variant_set.get_in_range(chrom, genomic_start, genomic_end)
+        else:
+            # Search all chromosomes
+            overlapping = [
+                v for v in self.variant_set.variants if genomic_start <= v.pos <= genomic_end
+            ]
+
+        # Filter by MAF
+        significant = [v for v in overlapping if not v.has_maf or v.maf >= self.maf_threshold]
+
+        # Classify by seed/non-seed region
+        # Seed in ASO: positions [seed_start, seed_end) (0-based)
+        # In genomic coordinates: [aso_start + seed_start + 1, aso_start + seed_end]
+        seed_genomic_start = aso_start + self.seed_start + 1
+        seed_genomic_end = aso_start + self.seed_end
+
+        seed_count = 0
+        non_seed_count = 0
+        pathogenic_count = 0
+
+        for v in significant:
+            if seed_genomic_start <= v.pos <= seed_genomic_end:
+                seed_count += 1
+            else:
+                non_seed_count += 1
+            if v.is_pathogenic:
+                pathogenic_count += 1
+
+        # Compute penalty
+        penalty = self._compute_penalty(significant, seed_count, non_seed_count)
+
+        return VariantAnnotation(
+            aso_start=aso_start,
+            aso_end=aso_end,
+            total_variants=len(significant),
+            seed_variants=seed_count,
+            non_seed_variants=non_seed_count,
+            pathogenic_variants=pathogenic_count,
+            has_pathogenic=pathogenic_count > 0,
+            penalty=penalty,
+            variants=significant,
+        )
+
+    def _compute_penalty(
+        self,
+        variants: list[Variant],
+        seed_count: int,
+        non_seed_count: int,
+    ) -> float:
+        """Compute a variant penalty score.
+
+        Penalty = (seed_variants * seed_multiplier + non_seed_variants) * maf_factor
+        where maf_factor is the average MAF of overlapping variants.
+
+        Returns
+        -------
+        float
+            Penalty in [0.0, 2.0]. Higher = worse.
+        """
+        if not variants:
+            return 0.0
+
+        # Base penalty: count-based
+        base = seed_count * self.seed_region_multiplier + non_seed_count
+
+        # MAF factor: average MAF of variants with known MAF
+        maf_values = [v.maf for v in variants if v.has_maf]
+        if maf_values:
+            avg_maf = sum(maf_values) / len(maf_values)
+            maf_factor = 1.0 + avg_maf  # Range [1.0, 2.0]
+        else:
+            maf_factor = 1.0
+
+        # Pathogenic bonus
+        pathogenic_bonus = 0.0
+        if self.flag_pathogenic:
+            pathogenic_count = sum(1 for v in variants if v.is_pathogenic)
+            pathogenic_bonus = pathogenic_count * 0.5
+
+        penalty = (base * maf_factor + pathogenic_bonus) / 10.0
+        return min(penalty, 2.0)  # Cap at 2.0
+
+    def annotate_batch(
+        self,
+        candidates: list[tuple[int, int]],
+        chrom: str = "",
+    ) -> list[VariantAnnotation]:
+        """Annotate multiple ASO candidates.
+
+        Parameters
+        ----------
+        candidates : list[tuple[int, int]]
+            List of (start, end) positions.
+        chrom : str
+            Chromosome (if using genomic coordinates).
+
+        Returns
+        -------
+        list[VariantAnnotation]
+            Annotations for each candidate.
+        """
+        return [self.annotate(start, end, chrom=chrom) for start, end in candidates]
