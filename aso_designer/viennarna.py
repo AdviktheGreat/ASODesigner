@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 from aso_designer.utils.exceptions import ViennaRNAError
 from aso_designer.utils.logger import get_logger
@@ -271,3 +272,136 @@ def _parse_rnafold_output(rna_seq: str, stdout: str) -> RNAfoldResult:
         return RNAfoldResult(sequence=rna_seq, structure=structure, mfe=mfe)
 
     raise ViennaRNAError(f"Could not parse RNAfold output: {stdout[:200]}")
+
+
+# ---------------------------------------------------------------------------
+# RNAplfold wrapper (local accessibility)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RNAplfoldResult:
+    """Result of an RNAplfold computation.
+
+    Attributes
+    ----------
+    positions : list[int]
+        1-based positions in the sequence.
+    unpaired_probs : list[float]
+        Probability of being unpaired at each position (0.0–1.0).
+    """
+
+    positions: list[int]
+    unpaired_probs: list[float]
+
+
+def run_rnaplfold(
+    sequence: str,
+    window_size: int = 150,
+    max_span: int = 100,
+    unpaired_region: int = 1,
+) -> RNAplfoldResult:
+    """Run RNAplfold to compute local unpaired probabilities.
+
+    RNAplfold computes the probability that each nucleotide is
+    unpaired within a sliding window. This is the key tool for
+    ASO target accessibility analysis.
+
+    Parameters
+    ----------
+    sequence : str
+        DNA or RNA sequence (case-insensitive, T → U conversion applied).
+    window_size : int
+        Sliding window size in nucleotides (default 150).
+    max_span : int
+        Maximum base pair distance (default 100).
+    unpaired_region : int
+        Maximum length of unpaired region to consider (default 1 =
+        per-nucleotide accessibility).
+
+    Returns
+    -------
+    RNAplfoldResult
+        Per-position unpaired probabilities.
+
+    Raises
+    ------
+    ViennaRNAError
+        If RNAplfold fails or output cannot be parsed.
+    """
+    import tempfile
+
+    rna_seq = dna_to_rna(sequence)
+    tool_path = _get_tool_path("RNAplfold")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        args = [
+            tool_path,
+            "-W",
+            str(window_size),
+            "-L",
+            str(max_span),
+            "-u",
+            str(unpaired_region),
+            "--id",
+            "asodesigner",
+            "-o",
+            tmpdir + "/",
+        ]
+
+        input_data = f">asodesigner\n{rna_seq}\n"
+
+        try:
+            subprocess.run(
+                args,
+                input=input_data,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=300,
+                cwd=tmpdir,
+            )
+        except subprocess.SubprocessError as e:
+            raise ViennaRNAError(f"RNAplfold execution failed: {e}") from e
+
+        # Find the lunp (unpaired probability) output file
+        lunp_files = list(Path(tmpdir).glob("*_lunp"))
+        if not lunp_files:
+            raise ViennaRNAError("RNAplfold did not produce an unpaired probability file")
+
+        return _parse_rnaplfold_lunp(lunp_files[0])
+
+
+def _parse_rnaplfold_lunp(filepath: Path) -> RNAplfoldResult:
+    """Parse an RNAplfold lunp (unpaired probability) output file.
+
+    The file format is:
+    #unpaired probabilities
+    #i   p_u   u
+    1    0.95  1
+    2    0.87  1
+    ...
+    """
+    positions: list[int] = []
+    unpaired_probs: list[float] = []
+
+    with open(filepath) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    pos = int(parts[0])
+                    prob = float(parts[1])
+                    positions.append(pos)
+                    unpaired_probs.append(prob)
+                except (ValueError, IndexError):
+                    continue
+
+    if not positions:
+        raise ViennaRNAError(f"No unpaired probabilities found in {filepath}")
+
+    logger.debug("Parsed %d unpaired probabilities from %s", len(positions), filepath)
+    return RNAplfoldResult(positions=positions, unpaired_probs=unpaired_probs)
