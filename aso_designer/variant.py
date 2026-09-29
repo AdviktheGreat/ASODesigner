@@ -775,12 +775,10 @@ class VariantFetchManager:
 def _load_vcf_fallback(vcf_path: str) -> list[Variant]:
     """Load variants from a VCF file (fallback).
 
-    This is a placeholder that will be fully implemented in Step 29
-    when the VCF parser is added. For now, it raises an error.
+    Uses the VCF parser to load and parse variants from a local
+    VCF file when API sources are unavailable or return no results.
     """
-    raise VariantError(
-        f"VCF fallback not yet implemented: {vcf_path}. Use the VCF parser from Step 29."
-    )
+    return parse_vcf(vcf_path)
 
 
 def _deduplicate_variant_set(
