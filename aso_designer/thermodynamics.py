@@ -13,6 +13,7 @@ assumes 1 M NaCl monovalent salt and non-self-complementary sequences
 unless otherwise specified.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from aso_designer.utils.exceptions import ThermodynamicsError
@@ -450,3 +451,155 @@ def score_tm(
         if tm_max == tm_optimal:
             return 1.0
         return 1.0 - 0.5 * (tm - tm_optimal) / (tm_max - tm_optimal)
+
+
+# ---------------------------------------------------------------------------
+# Duplex ΔG computation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DuplexResult:
+    """Result of duplex ΔG computation.
+
+    Attributes
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA alphabet).
+    target_sequence : str
+        Target subsequence (DNA alphabet).
+    method : str
+        Method used: "rnaduplex" or "nearest_neighbor".
+    dg_duplex : float
+        Duplex formation ΔG in kcal/mol (negative = favorable).
+    start_target : int
+        Start position of hybrid in target (1-based, 0 if NN method).
+    end_target : int
+        End position of hybrid in target (1-based, 0 if NN method).
+    """
+
+    aso_sequence: str
+    target_sequence: str
+    method: str
+    dg_duplex: float
+    start_target: int = 0
+    end_target: int = 0
+
+
+def calculate_duplex_dg_rnaduplex(
+    aso_sequence: str,
+    target_sequence: str,
+) -> DuplexResult:
+    """Compute duplex ΔG using ViennaRNA RNAduplex.
+
+    RNAduplex computes the minimum free energy of inter-molecular
+    hybridization, ignoring intramolecular structure. This is the
+    primary method for ASO:target binding energy.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA or RNA, T → U conversion applied).
+    target_sequence : str
+        Target subsequence (DNA or RNA, T → U conversion applied).
+
+    Returns
+    -------
+    DuplexResult
+        Duplex ΔG and hybridization positions.
+
+    Raises
+    ------
+    ThermodynamicsError
+        If RNAduplex fails.
+    """
+    from aso_designer.viennarna import run_rnaduplex
+
+    try:
+        result = run_rnaduplex(aso_sequence, target_sequence)
+    except Exception as e:
+        raise ThermodynamicsError(f"RNAduplex failed for ASO:target duplex: {e}") from e
+
+    return DuplexResult(
+        aso_sequence=aso_sequence.upper(),
+        target_sequence=target_sequence.upper(),
+        method="rnaduplex",
+        dg_duplex=result.mfe,
+        start_target=result.start2,
+        end_target=result.end2,
+    )
+
+
+def calculate_duplex_dg_nn(
+    aso_sequence: str,
+    chemistry: str = "gapmer",
+    temperature: float = 37.0,
+) -> DuplexResult:
+    """Compute duplex ΔG using the nearest-neighbor model.
+
+    The NN model computes ΔG for the ASO binding to its perfect
+    complement. This is faster than RNAduplex but does not account
+    for imperfect matches or bulges.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA alphabet).
+    chemistry : str
+        Chemistry name (determines RNA vs DNA NN parameters).
+    temperature : float
+        Temperature in °C (default 37 °C).
+
+    Returns
+    -------
+    DuplexResult
+        Duplex ΔG (NN-based).
+    """
+    use_rna = chemistry in _RNA_CHEMISTRIES
+    dg = calculate_dg(aso_sequence, temperature=temperature, rna=use_rna)
+    return DuplexResult(
+        aso_sequence=aso_sequence.upper(),
+        target_sequence="",
+        method="nearest_neighbor",
+        dg_duplex=dg,
+    )
+
+
+def calculate_duplex_dg(
+    aso_sequence: str,
+    target_sequence: str | None = None,
+    chemistry: str = "gapmer",
+    method: str = "nearest_neighbor",
+    temperature: float = 37.0,
+) -> DuplexResult:
+    """Compute duplex ΔG using the specified method.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA alphabet).
+    target_sequence : str or None
+        Target subsequence. Required for "rnaduplex" method.
+    chemistry : str
+        Chemistry name (for NN method parameter selection).
+    method : str
+        "nearest_neighbor" (fast, perfect match only) or
+        "rnaduplex" (ViennaRNA, handles mismatches).
+    temperature : float
+        Temperature for NN calculation (default 37 °C).
+
+    Returns
+    -------
+    DuplexResult
+        Duplex ΔG result.
+    """
+    if method == "rnaduplex":
+        if target_sequence is None:
+            raise ThermodynamicsError("target_sequence is required for rnaduplex method")
+        return calculate_duplex_dg_rnaduplex(aso_sequence, target_sequence)
+    elif method == "nearest_neighbor":
+        return calculate_duplex_dg_nn(aso_sequence, chemistry=chemistry, temperature=temperature)
+    else:
+        raise ThermodynamicsError(
+            f"Unknown duplex method: {method}. Use 'nearest_neighbor' or 'rnaduplex'."
+        )
