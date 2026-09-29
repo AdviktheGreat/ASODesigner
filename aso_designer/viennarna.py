@@ -405,3 +405,282 @@ def _parse_rnaplfold_lunp(filepath: Path) -> RNAplfoldResult:
 
     logger.debug("Parsed %d unpaired probabilities from %s", len(positions), filepath)
     return RNAplfoldResult(positions=positions, unpaired_probs=unpaired_probs)
+
+
+# ---------------------------------------------------------------------------
+# RNAcofold wrapper (two-sequence hybridization with intramolecular structure)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RNAcofoldResult:
+    """Result of an RNAcofold computation.
+
+    Attributes
+    ----------
+    sequence1 : str
+        First RNA sequence.
+    sequence2 : str
+        Second RNA sequence.
+    structure : str
+        Dot-bracket structure with '&' separator.
+    mfe : float
+        Minimum free energy of the hybrid in kcal/mol.
+    """
+
+    sequence1: str
+    sequence2: str
+    structure: str
+    mfe: float
+
+
+def run_rnacofold(
+    sequence1: str,
+    sequence2: str,
+    no_ps: bool = True,
+) -> RNAcofoldResult:
+    """Run RNAcofold on two sequences and parse the hybrid MFE.
+
+    RNAcofold computes the minimum free energy of two sequences
+    that can form both intra- and inter-molecular base pairs.
+    This is useful for computing the binding energy of an ASO
+    to its target when both can form self-structure.
+
+    Parameters
+    ----------
+    sequence1 : str
+        First sequence (DNA or RNA, T → U conversion applied).
+    sequence2 : str
+        Second sequence (DNA or RNA, T → U conversion applied).
+    no_ps : bool
+        Suppress PostScript output (default True).
+
+    Returns
+    -------
+    RNAcofoldResult
+        Sequences, dot-bracket structure, and MFE.
+
+    Raises
+    ------
+    ViennaRNAError
+        If RNAcofold fails or output cannot be parsed.
+    """
+    rna1 = dna_to_rna(sequence1)
+    rna2 = dna_to_rna(sequence2)
+    tool_path = _get_tool_path("RNAcofold")
+
+    args = [tool_path]
+    if no_ps:
+        args.append("--noPS")
+
+    input_data = f">seq1\n{rna1}&{rna2}\n"
+
+    try:
+        result = subprocess.run(
+            args,
+            input=input_data,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+    except subprocess.SubprocessError as e:
+        raise ViennaRNAError(f"RNAcofold execution failed: {e}") from e
+
+    return _parse_rnacofold_output(rna1, rna2, result.stdout)
+
+
+def _parse_rnacofold_output(rna1: str, rna2: str, stdout: str) -> RNAcofoldResult:
+    """Parse RNAcofold stdout.
+
+    Output format:
+    >seq1
+    AUGCAUGC&AUGCAUGC
+    ((((...))))&((((...))))  (-4.60)
+    """
+    lines = stdout.strip().split("\n")
+
+    for i, line in enumerate(lines):
+        if line.startswith(">"):
+            continue
+        if "&" in line:
+            # Next line has the structure and MFE
+            if i + 1 < len(lines):
+                structure_line = lines[i + 1].strip()
+                parts = structure_line.rsplit(" ", 1)
+                if len(parts) == 2:
+                    structure = parts[0]
+                    mfe_str = parts[1].strip("()")
+                    try:
+                        mfe = float(mfe_str)
+                        return RNAcofoldResult(
+                            sequence1=rna1,
+                            sequence2=rna2,
+                            structure=structure,
+                            mfe=mfe,
+                        )
+                    except ValueError:
+                        pass
+
+    # Regex fallback
+    mfe_match = re.search(r"\(\s*(-?\d+\.\d+)\s*\)", stdout)
+    if mfe_match:
+        mfe = float(mfe_match.group(1))
+        structure = ""
+        for line in lines:
+            if "&" in line and not line.startswith(">"):
+                bracket_part = line.rsplit(" ", 1)[0]
+                if all(c in "().&." for c in bracket_part):
+                    structure = bracket_part
+                    break
+        return RNAcofoldResult(sequence1=rna1, sequence2=rna2, structure=structure, mfe=mfe)
+
+    raise ViennaRNAError(f"Could not parse RNAcofold output: {stdout[:200]}")
+
+
+# ---------------------------------------------------------------------------
+# RNAduplex wrapper (inter-molecular hybridization only)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RNAduplexResult:
+    """Result of an RNAduplex computation.
+
+    Attributes
+    ----------
+    sequence1 : str
+        First RNA sequence.
+    sequence2 : str
+        Second RNA sequence.
+    structure : str
+        Dot-bracket structure with '&' separator.
+    mfe : float
+        Minimum free energy of the duplex in kcal/mol.
+    start1 : int
+        Start position of hybrid in sequence 1 (1-based).
+    end1 : int
+        End position of hybrid in sequence 1 (1-based).
+    start2 : int
+        Start position of hybrid in sequence 2 (1-based).
+    end2 : int
+        End position of hybrid in sequence 2 (1-based).
+    """
+
+    sequence1: str
+    sequence2: str
+    structure: str
+    mfe: float
+    start1: int
+    end1: int
+    start2: int
+    end2: int
+
+
+def run_rnaduplex(
+    sequence1: str,
+    sequence2: str,
+    no_ps: bool = True,
+) -> RNAduplexResult:
+    """Run RNAduplex on two sequences and parse the duplex MFE.
+
+    RNAduplex computes the minimum free energy of the optimal
+    inter-molecular hybridization between two sequences, ignoring
+    intramolecular structure. This is the primary tool for ASO:target
+    binding energy computation.
+
+    Parameters
+    ----------
+    sequence1 : str
+        First sequence (DNA or RNA, T → U conversion applied).
+    sequence2 : str
+        Second sequence (DNA or RNA, T → U conversion applied).
+    no_ps : bool
+        Suppress PostScript output (default True).
+
+    Returns
+    -------
+    RNAduplexResult
+        Sequences, structure, MFE, and hybridization positions.
+
+    Raises
+    ------
+    ViennaRNAError
+        If RNAduplex fails or output cannot be parsed.
+    """
+    rna1 = dna_to_rna(sequence1)
+    rna2 = dna_to_rna(sequence2)
+    tool_path = _get_tool_path("RNAduplex")
+
+    args = [tool_path]
+    if no_ps:
+        args.append("--noPS")
+
+    input_data = f"{rna1}\n{rna2}\n"
+
+    try:
+        result = subprocess.run(
+            args,
+            input=input_data,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+    except subprocess.SubprocessError as e:
+        raise ViennaRNAError(f"RNAduplex execution failed: {e}") from e
+
+    return _parse_rnaduplex_output(rna1, rna2, result.stdout)
+
+
+def _parse_rnaduplex_output(rna1: str, rna2: str, stdout: str) -> RNAduplexResult:
+    """Parse RNAduplex stdout.
+
+    Output format:
+    .(((((((((...)))))))))...  &...((((((....))))))...  (-12.40)
+    1,15  : 30,16
+    """
+    lines = stdout.strip().split("\n")
+
+    structure = ""
+    mfe = 0.0
+    start1 = end1 = start2 = end2 = 0
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith(">"):
+            continue
+
+        # Structure + MFE line: contains '&' and '(' ')'
+        if "&" in line and ("(" in line or ")" in line):
+            parts = line.rsplit(" ", 1)
+            if len(parts) == 2:
+                structure = parts[0]
+                mfe_str = parts[1].strip("()")
+                try:
+                    mfe = float(mfe_str)
+                except ValueError:
+                    pass
+
+        # Position line: "1,15  : 30,16"
+        if ":" in line and "," in line:
+            match = re.match(r"(\d+),(\d+)\s*:\s*(\d+),(\d+)", line)
+            if match:
+                start1 = int(match.group(1))
+                end1 = int(match.group(2))
+                start2 = int(match.group(3))
+                end2 = int(match.group(4))
+
+    if structure and mfe != 0.0:
+        return RNAduplexResult(
+            sequence1=rna1,
+            sequence2=rna2,
+            structure=structure,
+            mfe=mfe,
+            start1=start1,
+            end1=end1,
+            start2=start2,
+            end2=end2,
+        )
+
+    raise ViennaRNAError(f"Could not parse RNAduplex output: {stdout[:200]}")
