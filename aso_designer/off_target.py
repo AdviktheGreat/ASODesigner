@@ -19,7 +19,7 @@ from pathlib import Path
 
 from aso_designer.utils.exceptions import OffTargetError
 from aso_designer.utils.logger import get_logger
-from aso_designer.utils.sequence import validate_sequence
+from aso_designer.utils.sequence import reverse_complement, validate_sequence
 
 logger = get_logger(__name__)
 
@@ -222,3 +222,217 @@ class TranscriptomeReference:
             "indexed": self._indexed,
             "unique_kmers": len(self._index) if self._indexed else 0,
         }
+
+
+# ---------------------------------------------------------------------------
+# Off-target hit
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OffTargetHit:
+    """A single off-target binding site.
+
+    Attributes
+    ----------
+    transcript_id : str
+        Transcript where the hit was found.
+    gene_name : str
+        Gene name of the transcript.
+    position : int
+        Start position of the hit in the transcript (0-based).
+    mismatches : int
+        Total number of mismatches in the full-length alignment.
+    seed_mismatches : int
+        Number of mismatches in the seed region.
+    aligned_sequence : str
+        The transcript subsequence at the hit position.
+    is_on_target : bool
+        True if this is the intended target site (not an off-target).
+    """
+
+    transcript_id: str
+    gene_name: str
+    position: int
+    mismatches: int
+    seed_mismatches: int
+    aligned_sequence: str
+    is_on_target: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Search engine
+# ---------------------------------------------------------------------------
+
+
+def _hamming_distance(seq1: str, seq2: str) -> int:
+    """Compute Hamming distance between two equal-length sequences."""
+    return sum(a != b for a, b in zip(seq1, seq2, strict=True))
+
+
+class OffTargetSearchEngine:
+    """Searches a transcriptome reference for ASO off-target binding sites.
+
+    Uses a seed-and-extend strategy:
+    1. Compute the reverse complement of the ASO (target binding site)
+    2. Extract k-mers from the target site and look up in the index
+    3. For each candidate position, verify the full-length match
+    4. Count total and seed-region mismatches
+
+    Parameters
+    ----------
+    reference : TranscriptomeReference
+        The indexed transcriptome to search against.
+    max_mismatches : int
+        Maximum allowed mismatches for a hit (default 3).
+    seed_start : int
+        Seed region start position in the ASO (0-based, default 2).
+    seed_end : int
+        Seed region end position in the ASO (exclusive, default 8).
+    """
+
+    def __init__(
+        self,
+        reference: TranscriptomeReference,
+        max_mismatches: int = 3,
+        seed_start: int = 2,
+        seed_end: int = 8,
+    ):
+        self.reference = reference
+        self.max_mismatches = max_mismatches
+        self.seed_start = seed_start
+        self.seed_end = seed_end
+
+    def search(
+        self,
+        aso_sequence: str,
+        on_target_transcript: str | None = None,
+        on_target_position: int | None = None,
+    ) -> list[OffTargetHit]:
+        """Search for off-target binding sites for an ASO.
+
+        The ASO binds to its target by reverse complementarity.
+        This function searches the transcriptome for sequences
+        similar to the reverse complement of the ASO.
+
+        Parameters
+        ----------
+        aso_sequence : str
+            ASO sequence (DNA alphabet, 5'→3').
+        on_target_transcript : str or None
+            Transcript ID of the intended target. Hits in this
+            transcript at the on-target position are flagged as
+            on-target (not off-target).
+        on_target_position : int or None
+            Position of the on-target site in the target transcript.
+
+        Returns
+        -------
+        list[OffTargetHit]
+            All hits (on-target and off-target), sorted by mismatches.
+        """
+        self.reference.ensure_index()
+
+        aso_seq = aso_sequence.upper()
+        target_site = reverse_complement(aso_seq)
+        L = len(target_site)
+        k = self.reference.kmer_size
+
+        if L < k:
+            raise OffTargetError(f"ASO length {L} is shorter than k-mer size {k}")
+
+        # Extract k-mers from the target site and look up in the index
+        candidate_positions: set[tuple[int, int]] = set()
+        for i in range(L - k + 1):
+            kmer = target_site[i : i + k]
+            if kmer in self.reference._index:
+                for tidx, pos in self.reference._index[kmer]:
+                    # Adjust position to the start of the full-length match
+                    start = pos - i
+                    if start >= 0 and start + L <= self.reference.get_transcript(tidx).length:
+                        candidate_positions.add((tidx, start))
+
+        # Verify each candidate with full-length Hamming distance
+        hits: list[OffTargetHit] = []
+        seen: set[tuple[int, int]] = set()
+
+        for tidx, start in candidate_positions:
+            if (tidx, start) in seen:
+                continue
+            seen.add((tidx, start))
+
+            transcript = self.reference.get_transcript(tidx)
+            aligned = transcript.sequence[start : start + L]
+            if len(aligned) < L:
+                continue
+
+            mismatches = _hamming_distance(target_site, aligned)
+            if mismatches > self.max_mismatches:
+                continue
+
+            # Count seed mismatches
+            # Seed in target site: positions [L - seed_end, L - seed_start)
+            seed_start_target = L - self.seed_end
+            seed_end_target = L - self.seed_start
+            seed_target = target_site[seed_start_target:seed_end_target]
+            seed_aligned = aligned[seed_start_target:seed_end_target]
+            seed_mismatches = _hamming_distance(seed_target, seed_aligned)
+
+            # Determine if this is the on-target hit
+            is_on_target = (
+                on_target_transcript is not None
+                and transcript.transcript_id == on_target_transcript
+                and on_target_position is not None
+                and start == on_target_position
+            )
+
+            hits.append(
+                OffTargetHit(
+                    transcript_id=transcript.transcript_id,
+                    gene_name=transcript.gene_name,
+                    position=start,
+                    mismatches=mismatches,
+                    seed_mismatches=seed_mismatches,
+                    aligned_sequence=aligned,
+                    is_on_target=is_on_target,
+                )
+            )
+
+        hits.sort(key=lambda h: (h.mismatches, h.seed_mismatches))
+        return hits
+
+    def search_batch(
+        self,
+        aso_sequences: list[str],
+        on_target_transcripts: list[str | None] | None = None,
+        on_target_positions: list[int | None] | None = None,
+    ) -> dict[int, list[OffTargetHit]]:
+        """Search for off-targets for multiple ASO candidates.
+
+        Parameters
+        ----------
+        aso_sequences : list[str]
+            List of ASO sequences.
+        on_target_transcripts : list or None
+            List of on-target transcript IDs (same length as aso_sequences).
+        on_target_positions : list or None
+            List of on-target positions (same length as aso_sequences).
+
+        Returns
+        -------
+        dict[int, list[OffTargetHit]]
+            Maps ASO index to its list of hits.
+        """
+        if on_target_transcripts is None:
+            on_target_transcripts = [None] * len(aso_sequences)
+        if on_target_positions is None:
+            on_target_positions = [None] * len(aso_sequences)
+
+        results: dict[int, list[OffTargetHit]] = {}
+        for i, seq in enumerate(aso_sequences):
+            results[i] = self.search(
+                seq,
+                on_target_transcript=on_target_transcripts[i],
+                on_target_position=on_target_positions[i],
+            )
+        return results
