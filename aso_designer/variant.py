@@ -442,3 +442,223 @@ def _parse_spdi(spdi: str) -> tuple[str, str]:
     if len(parts) >= 4:
         return parts[-2], parts[-1]
     return "", ""
+
+
+# ---------------------------------------------------------------------------
+# ClinVar API client
+# ---------------------------------------------------------------------------
+
+
+class ClinVarClient:
+    """Client for fetching pathogenic variants from ClinVar via E-utilities.
+
+    Queries NCBI ClinVar for variants with clinical significance
+    (pathogenic, likely pathogenic) associated with a gene.
+
+    Parameters
+    ----------
+    email : str
+        Email for NCBI API identification.
+    api_key : str, optional
+        NCBI API key for higher rate limits.
+    rate_limit : float
+        Minimum seconds between requests.
+    """
+
+    def __init__(
+        self,
+        email: str = "",
+        api_key: str | None = None,
+        rate_limit: float | None = None,
+    ):
+        self.email = email
+        self.api_key = api_key
+        self.rate_limit = rate_limit or (0.1 if api_key else 0.34)
+        self._last_request_time: float = 0.0
+
+    def fetch_pathogenic_variants(
+        self,
+        gene_name: str,
+        organism: str = "Homo sapiens",
+        max_results: int = 200,
+    ) -> list[Variant]:
+        """Fetch pathogenic variants for a gene from ClinVar.
+
+        Parameters
+        ----------
+        gene_name : str
+            Gene symbol.
+        organism : str
+            Organism name (default "Homo sapiens").
+        max_results : int
+            Maximum results (default 200).
+
+        Returns
+        -------
+        list[Variant]
+            Pathogenic variants from ClinVar.
+
+        Raises
+        ------
+        VariantError
+            If the API request fails.
+        """
+        import json
+        import time
+        import urllib.parse
+        import urllib.request
+
+        # Rate limiting
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.rate_limit:
+            time.sleep(self.rate_limit - elapsed)
+
+        # ESearch: find ClinVar records for pathogenic variants in gene
+        search_term = (
+            f"{gene_name}[Gene] AND {organism}[Organism] "
+            f'AND ("pathogenic"[Clinical_Significance] '
+            f'OR "likely pathogenic"[Clinical_Significance])'
+        )
+        params = {
+            "db": "clinvar",
+            "term": search_term,
+            "retmax": str(max_results),
+            "retmode": "json",
+        }
+        if self.email:
+            params["email"] = self.email
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        url = f"{_EUTILS_URL}/esearch.fcgi?" + urllib.parse.urlencode(params)
+
+        try:
+            self._last_request_time = time.time()
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as e:
+            raise VariantError(f"ClinVar ESearch failed for gene {gene_name}: {e}") from e
+
+        ids = data.get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            logger.info("No ClinVar pathogenic variants found for %s", gene_name)
+            return []
+
+        # ESummary: fetch variant details
+        variants = self._fetch_clinvar_summaries(ids)
+        logger.info(
+            "Fetched %d ClinVar pathogenic variants for gene %s",
+            len(variants),
+            gene_name,
+        )
+        return variants
+
+    def _fetch_clinvar_summaries(self, ids: list[str]) -> list[Variant]:
+        """Fetch ClinVar variant summaries from ESummary."""
+        import json
+        import time
+        import urllib.parse
+        import urllib.request
+
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.rate_limit:
+            time.sleep(self.rate_limit - elapsed)
+
+        params = {
+            "db": "clinvar",
+            "id": ",".join(ids),
+            "retmode": "json",
+        }
+        if self.email:
+            params["email"] = self.email
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        url = f"{_EUTILS_URL}/esummary.fcgi?" + urllib.parse.urlencode(params)
+
+        try:
+            self._last_request_time = time.time()
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as e:
+            raise VariantError(f"ClinVar ESummary failed: {e}") from e
+
+        result_list = data.get("result", [])
+        variants: list[Variant] = []
+
+        for item in result_list:
+            if not isinstance(item, dict):
+                continue
+            uid = item.get("uid", "")
+            if not uid:
+                continue
+
+            # Parse ClinVar fields
+            chrom = item.get("chromosome", "")
+            pos_str = item.get("location", "")
+            pos = _parse_clinvar_position(pos_str)
+            clinical_sig = item.get("clinical_significance", "")
+            # Normalize clinical significance
+            clinical_sig = _normalize_clinical_significance(clinical_sig)
+            variant_type = _classify_variant_type(item.get("variation_type", ""))
+            ref, alt = _parse_clinvar_alleles(item.get("alleles", ""))
+
+            if chrom and pos:
+                variants.append(
+                    Variant(
+                        chrom=chrom,
+                        pos=pos,
+                        ref=ref,
+                        alt=alt,
+                        rs_id=item.get("rs_id", ""),
+                        maf=-1.0,  # ClinVar doesn't provide MAF
+                        variant_type=variant_type,
+                        clinical_significance=clinical_sig,
+                        gene=item.get("gene_sort", ""),
+                    )
+                )
+
+        return variants
+
+
+def _parse_clinvar_position(pos_str: str) -> int:
+    """Parse a ClinVar position string into an integer."""
+    if not pos_str:
+        return 0
+    # Positions can be "12345" or "12345-12350" (range)
+    pos_part = pos_str.split("-")[0].split(",")[0]
+    try:
+        return int(pos_part)
+    except ValueError:
+        return 0
+
+
+def _normalize_clinical_significance(sig: str) -> str:
+    """Normalize ClinVar significance strings."""
+    sig_lower = sig.lower().strip()
+    if "pathogenic" in sig_lower and "likely" in sig_lower:
+        return "likely_pathogenic"
+    if "pathogenic" in sig_lower:
+        return "pathogenic"
+    if "benign" in sig_lower and "likely" in sig_lower:
+        return "likely_benign"
+    if "benign" in sig_lower:
+        return "benign"
+    if "uncertain" in sig_lower or "vus" in sig_lower:
+        return "uncertain"
+    return sig_lower
+
+
+def _parse_clinvar_alleles(alleles: str) -> tuple[str, str]:
+    """Parse ClinVar alleles string into ref and alt."""
+    if not alleles:
+        return "", ""
+    # Format can be "A/G" or "AT/-" etc.
+    if "/" in alleles:
+        parts = alleles.split("/")
+        ref = parts[0] if parts else ""
+        alt = parts[1] if len(parts) > 1 else ""
+        return ref, alt
+    return "", ""
