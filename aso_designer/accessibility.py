@@ -11,6 +11,7 @@ Results are cached to disk to avoid expensive re-computation.
 from __future__ import annotations
 
 import hashlib
+import json
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -248,3 +249,175 @@ class TargetStructurePredictor:
                 pickle.dump(result, f)
         except Exception as e:
             logger.warning("Failed to save cache %s: %s", path, e)
+
+
+# ---------------------------------------------------------------------------
+# Accessibility scoring
+# ---------------------------------------------------------------------------
+
+
+def score_position_accessibility(unpaired_prob: float) -> float:
+    """Convert an unpaired probability to an accessibility score.
+
+    The unpaired probability from RNAplfold is already in [0, 1],
+    so this is essentially a pass-through with clamping.
+
+    Parameters
+    ----------
+    unpaired_prob : float
+        Probability of being unpaired (0.0–1.0).
+
+    Returns
+    -------
+    float
+        Accessibility score in [0.0, 1.0].
+    """
+    return max(0.0, min(1.0, unpaired_prob))
+
+
+def score_window_accessibility(
+    profile: AccessibilityProfile,
+    start: int,
+    end: int,
+    aggregation: str = "mean",
+) -> float:
+    """Aggregate accessibility across a binding site window.
+
+    Computes a single accessibility score for the region [start, end]
+    (1-based, inclusive) by aggregating per-position scores.
+
+    Parameters
+    ----------
+    profile : AccessibilityProfile
+        Pre-computed accessibility profile.
+    start : int
+        Start position (1-based, inclusive).
+    end : int
+        End position (1-based, inclusive).
+    aggregation : str
+        Aggregation method: "mean", "median", "min", or "max".
+        "mean" is recommended as it balances overall accessibility.
+        "min" is conservative (worst position determines the score).
+
+    Returns
+    -------
+    float
+        Aggregated accessibility score in [0.0, 1.0].
+
+    Raises
+    ------
+    ValueError
+        If start/end are out of range or aggregation is unknown.
+    """
+    if start < 1 or end > len(profile.unpaired_probs) or start > end:
+        raise ValueError(
+            f"Invalid window [{start}, {end}] for sequence of length {len(profile.unpaired_probs)}"
+        )
+
+    window_probs = profile.unpaired_probs[start - 1 : end]
+    scores = [score_position_accessibility(p) for p in window_probs]
+
+    if aggregation == "mean":
+        return sum(scores) / len(scores)
+    elif aggregation == "median":
+        sorted_scores = sorted(scores)
+        n = len(sorted_scores)
+        if n % 2 == 0:
+            return (sorted_scores[n // 2 - 1] + sorted_scores[n // 2]) / 2
+        return sorted_scores[n // 2]
+    elif aggregation == "min":
+        return min(scores)
+    elif aggregation == "max":
+        return max(scores)
+    else:
+        raise ValueError(
+            f"Unknown aggregation method: {aggregation}. Use 'mean', 'median', 'min', or 'max'."
+        )
+
+
+def classify_accessibility(
+    score: float,
+    accessible_threshold: float = 0.5,
+    moderate_threshold: float = 0.3,
+) -> str:
+    """Classify a binding site by accessibility score.
+
+    Parameters
+    ----------
+    score : float
+        Aggregated accessibility score (0.0–1.0).
+    accessible_threshold : float
+        Scores at or above this are "accessible" (default 0.5).
+    moderate_threshold : float
+        Scores at or above this (but below accessible_threshold) are
+        "moderate" (default 0.3). Below this is "inaccessible".
+
+    Returns
+    -------
+    str
+        One of "accessible", "moderate", or "inaccessible".
+    """
+    if score >= accessible_threshold:
+        return "accessible"
+    elif score >= moderate_threshold:
+        return "moderate"
+    else:
+        return "inaccessible"
+
+
+def export_profile(
+    profile: AccessibilityProfile,
+    output_path: Path | str,
+    fmt: str = "json",
+) -> Path:
+    """Export an accessibility profile for visualization.
+
+    Parameters
+    ----------
+    profile : AccessibilityProfile
+        Pre-computed accessibility profile.
+    output_path : Path or str
+        Output file path.
+    fmt : str
+        Output format: "json" or "csv".
+
+    Returns
+    -------
+    Path
+        Path to the exported file.
+
+    Raises
+    ------
+    ValueError
+        If the format is not supported.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "json":
+        data = {
+            "sequence": profile.sequence,
+            "window_size": profile.window_size,
+            "positions": profile.positions,
+            "unpaired_probs": profile.unpaired_probs,
+            "accessibility_scores": [
+                score_position_accessibility(p) for p in profile.unpaired_probs
+            ],
+        }
+        with open(output_path, "w") as f:
+            json.dump(data, f, indent=2)
+
+    elif fmt == "csv":
+        import csv
+
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["position", "unpaired_prob", "accessibility_score"])
+            for pos, prob in zip(profile.positions, profile.unpaired_probs, strict=True):
+                writer.writerow([pos, prob, score_position_accessibility(prob)])
+
+    else:
+        raise ValueError(f"Unsupported format: {fmt}. Use 'json' or 'csv'.")
+
+    logger.info("Exported accessibility profile to %s", output_path)
+    return output_path
