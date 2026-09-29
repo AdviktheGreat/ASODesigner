@@ -961,3 +961,82 @@ def _classify_vcf_variant_type(ref: str, alt: str) -> str:
     if len(ref) > 1 and len(alt) > 1:
         return "mnv"
     return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# VCF loading and filtering convenience functions
+# ---------------------------------------------------------------------------
+
+
+def load_vcf(file_path: str) -> VariantSet:
+    """Parse a VCF file and return a VariantSet.
+
+    Convenience function that parses a VCF file and builds a
+    VariantSet with position-based indexing.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the VCF file.
+
+    Returns
+    -------
+    VariantSet
+        Variant set with all parsed variants.
+    """
+    variants = parse_vcf(file_path)
+    vs = VariantSet()
+    vs.add_variants(variants)
+    return vs
+
+
+def load_vcf_filtered(
+    file_path: str,
+    min_maf: float = 0.0,
+    variant_types: set[str] | None = None,
+    pathogenic_only: bool = False,
+) -> VariantSet:
+    """Parse a VCF file and return a filtered VariantSet.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the VCF file.
+    min_maf : float
+        Minimum MAF (default 0.0 = no MAF filter).
+    variant_types : set[str] or None
+        Allowed variant types (e.g., {"snv"}). None = all types.
+    pathogenic_only : bool
+        If True, keep only pathogenic variants.
+
+    Returns
+    -------
+    VariantSet
+        Filtered variant set.
+    """
+    vs = load_vcf(file_path)
+
+    filtered: list[Variant] = []
+    for v in vs.variants:
+        # MAF filter
+        if min_maf > 0 and (not v.has_maf or v.maf < min_maf):
+            continue
+        # Type filter
+        if variant_types and v.variant_type not in variant_types:
+            continue
+        # Pathogenic filter
+        if pathogenic_only and not v.is_pathogenic:
+            continue
+        filtered.append(v)
+
+    result = VariantSet()
+    result.add_variants(filtered)
+    logger.info(
+        "VCF filtered: %d → %d variants (min_maf=%s, types=%s, pathogenic=%s)",
+        vs.num_variants,
+        result.num_variants,
+        min_maf,
+        variant_types,
+        pathogenic_only,
+    )
+    return result
