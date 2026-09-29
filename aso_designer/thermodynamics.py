@@ -13,6 +13,8 @@ assumes 1 M NaCl monovalent salt and non-self-complementary sequences
 unless otherwise specified.
 """
 
+from pathlib import Path
+
 from aso_designer.utils.exceptions import ThermodynamicsError
 from aso_designer.utils.logger import get_logger
 
@@ -315,3 +317,136 @@ def calculate_dg(
     # ΔS is in cal/(mol·K), ΔH is in kcal/mol → convert ΔS to kcal
     dg = dh - (t_kelvin * ds / 1000.0)
     return dg
+
+
+# ---------------------------------------------------------------------------
+# Chemistry-aware Tm calculation and scoring
+# ---------------------------------------------------------------------------
+
+# Chemistry types that use RNA NN parameters (target is RNA, ASO is RNA-like)
+_RNA_CHEMISTRIES = {"2ome", "moe"}
+
+
+def get_chemistry_tm_adjustment(chemistry: str) -> float:
+    """Get the Tm adjustment for a given chemistry from presets.
+
+    Parameters
+    ----------
+    chemistry : str
+        Chemistry name: gapmer, mixmer, 2ome, moe, morpholino.
+
+    Returns
+    -------
+    float
+        Tm adjustment in °C (added to computed Tm).
+    """
+    import yaml
+
+    preset_path = Path(__file__).parent / "config" / "chemistry_presets.yaml"
+    try:
+        with open(preset_path) as f:
+            presets = yaml.safe_load(f) or {}
+    except Exception:
+        logger.warning("Could not load chemistry presets; using 0.0 adjustment")
+        return 0.0
+
+    preset = presets.get(chemistry, {})
+    return preset.get("tm_adjustment", 0.0)
+
+
+def calculate_tm_with_chemistry(
+    sequence: str,
+    chemistry: str = "gapmer",
+    na_conc: float = 0.1,
+    oligo_conc: float = 1.0e-6,
+) -> float:
+    """Calculate Tm with chemistry-specific NN parameters and adjustment.
+
+    Selects the appropriate NN parameter set based on chemistry:
+    - 2'OMe, MOE: RNA NN parameters (ASO is RNA-like, binds RNA target)
+    - Gapmer, mixmer, morpholino: DNA NN parameters (DNA or DNA-like backbone)
+
+    Then applies the chemistry-specific Tm adjustment from presets.
+
+    Parameters
+    ----------
+    sequence : str
+        ASO sequence in DNA alphabet (ACGT, will be converted to RNA if needed).
+    chemistry : str
+        Chemistry name (default "gapmer").
+    na_conc : float
+        Sodium concentration in M (default 0.1).
+    oligo_conc : float
+        Oligo concentration in M (default 1 µM).
+
+    Returns
+    -------
+    float
+        Adjusted Tm in °C.
+    """
+    use_rna = chemistry in _RNA_CHEMISTRIES
+    base_tm = calculate_tm(
+        sequence,
+        na_conc=na_conc,
+        oligo_conc=oligo_conc,
+        rna=use_rna,
+    )
+    adjustment = get_chemistry_tm_adjustment(chemistry)
+    adjusted_tm = base_tm + adjustment
+    logger.debug(
+        "Tm for %s (%s): base=%.2f, adj=%+.2f, final=%.2f",
+        sequence[:10],
+        chemistry,
+        base_tm,
+        adjustment,
+        adjusted_tm,
+    )
+    return adjusted_tm
+
+
+def score_tm(
+    tm: float,
+    tm_optimal: float = 52.0,
+    tm_min: float = 40.0,
+    tm_max: float = 65.0,
+) -> float:
+    """Score a Tm value based on distance from optimal.
+
+    Returns a score in [0.0, 1.0]:
+    - 1.0 at tm_optimal
+    - Linear decrease to 0.5 at tm_min or tm_max
+    - 0.0 outside [tm_min, tm_max]
+
+    Parameters
+    ----------
+    tm : float
+        Computed Tm in °C.
+    tm_optimal : float
+        Optimal Tm in °C (default 52.0).
+    tm_min : float
+        Minimum acceptable Tm (default 40.0).
+    tm_max : float
+        Maximum acceptable Tm (default 65.0).
+
+    Returns
+    -------
+    float
+        Tm score in [0.0, 1.0].
+    """
+    if tm < tm_min or tm > tm_max:
+        return 0.0
+
+    if tm == tm_optimal:
+        return 1.0
+
+    # Linear interpolation: 1.0 at optimal, 0.5 at boundaries
+    if tm < tm_optimal:
+        # Below optimal: interpolate between tm_min (0.5) and tm_optimal (1.0)
+        if tm_min == tm_optimal:
+            return 1.0
+        return 0.5 + 0.5 * (tm - tm_min) / (tm_optimal - tm_min)
+    else:
+        # Above optimal: interpolate between tm_optimal (1.0) and tm_max (0.5)
+        if tm_max == tm_optimal:
+            return 1.0
+        return 1.0 - 0.5 * (tm - tm_optimal) / (tm_max - tm_optimal)
