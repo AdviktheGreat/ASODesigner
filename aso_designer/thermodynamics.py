@@ -269,14 +269,14 @@ def calculate_tm(
 
     # Apply salt correction
     if salt_correction == "santalucia":
-        # SantaLucia 1998: Tm(salt) = Tm(1M) + (1/ΔS) * 0.368 * (N-1) * ln([Na+])
-        # N = number of phosphates = length of sequence
+        # SantaLucia 1998: adjust ΔS for salt concentration
+        # ΔS_corrected = ΔS + 0.368 * (N-1) * ln([Na+])
+        # Then recompute Tm with corrected ΔS
         n_phosphates = len(seq)
-        if ds != 0:
-            salt_term = (1.0 / ds) * 0.368 * (n_phosphates - 1) * math.log(na_conc)
-            tm = tm_1m + salt_term
-        else:
-            tm = tm_1m
+        ds_corrected = ds + 0.368 * (n_phosphates - 1) * math.log(na_conc)
+        if ds_corrected + R * math.log(oligo_conc / x) == 0:
+            raise ThermodynamicsError("Denominator is zero in Tm calculation (salt-corrected)")
+        tm = (dh * 1000) / (ds_corrected + R * math.log(oligo_conc / x)) - 273.15
     elif salt_correction == "log10":
         # Simple: Tm(salt) = Tm(1M) + 16.6 * log10([Na+])
         tm = tm_1m + 16.6 * math.log10(na_conc)
