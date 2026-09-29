@@ -195,3 +195,123 @@ def calculate_nn_thermodynamics(
         total_s += symmetry[1]
 
     return total_h, total_s
+
+
+# ---------------------------------------------------------------------------
+# Melting temperature (Tm) calculation
+# ---------------------------------------------------------------------------
+
+
+def calculate_tm(
+    sequence: str,
+    na_conc: float = 0.1,
+    oligo_conc: float = 1.0e-6,
+    rna: bool = False,
+    salt_correction: str = "santalucia",
+) -> float:
+    """Calculate the melting temperature (Tm) using the NN model.
+
+    Tm = (ΔH * 1000) / (ΔS + R * ln(C_T / x)) - 273.15
+
+    where:
+    - ΔH = total enthalpy (kcal/mol)
+    - ΔS = total entropy (cal/(mol·K))
+    - R = 1.987 cal/(mol·K)
+    - C_T = total strand concentration (M)
+    - x = 4 for non-self-complementary, 1 for self-complementary
+
+    Parameters
+    ----------
+    sequence : str
+        Oligonucleotide sequence (DNA or RNA alphabet).
+    na_conc : float
+        Sodium concentration in M (default 0.1 M = 100 mM).
+    oligo_conc : float
+        Total oligo strand concentration in M (default 1 µM).
+    rna : bool
+        If True, use RNA/RNA NN parameters.
+    salt_correction : str
+        Salt correction method: "santalucia" (1998) or "log10" (simple).
+
+    Returns
+    -------
+    float
+        Melting temperature in °C.
+
+    Raises
+    ------
+    ThermodynamicsError
+        If NN calculation fails or salt correction is unknown.
+    """
+    import math
+
+    dh, ds = calculate_nn_thermodynamics(sequence, rna=rna)
+
+    # Symmetry factor: 1 for self-complementary, 4 otherwise
+    seq = sequence.upper()
+    if rna:
+        seq = seq.replace("T", "U")
+    is_self_comp = _is_self_complementary(seq, rna=rna)
+    x = 1 if is_self_comp else 4
+
+    # Tm at 1 M NaCl
+    # ΔH in kcal/mol → * 1000 to get cal/mol
+    # ΔS in cal/(mol·K)
+    # R * ln(C_T / x) in cal/(mol·K)
+    denominator = ds + R * math.log(oligo_conc / x)
+    if denominator == 0:
+        raise ThermodynamicsError("Denominator is zero in Tm calculation")
+
+    tm_1m = (dh * 1000) / denominator - 273.15
+
+    # Apply salt correction
+    if salt_correction == "santalucia":
+        # SantaLucia 1998: Tm(salt) = Tm(1M) + (1/ΔS) * 0.368 * (N-1) * ln([Na+])
+        # N = number of phosphates = length of sequence
+        n_phosphates = len(seq)
+        if ds != 0:
+            salt_term = (1.0 / ds) * 0.368 * (n_phosphates - 1) * math.log(na_conc)
+            tm = tm_1m + salt_term
+        else:
+            tm = tm_1m
+    elif salt_correction == "log10":
+        # Simple: Tm(salt) = Tm(1M) + 16.6 * log10([Na+])
+        tm = tm_1m + 16.6 * math.log10(na_conc)
+    else:
+        raise ThermodynamicsError(
+            f"Unknown salt correction method: {salt_correction}. Use 'santalucia' or 'log10'."
+        )
+
+    return tm
+
+
+def calculate_dg(
+    sequence: str,
+    temperature: float = 37.0,
+    rna: bool = False,
+) -> float:
+    """Calculate ΔG at a given temperature using the NN model.
+
+    ΔG = ΔH - T * ΔS / 1000
+
+    where T is in Kelvin and ΔS is converted from cal to kcal.
+
+    Parameters
+    ----------
+    sequence : str
+        Oligonucleotide sequence.
+    temperature : float
+        Temperature in °C (default 37 °C).
+    rna : bool
+        If True, use RNA/RNA NN parameters.
+
+    Returns
+    -------
+    float
+        ΔG in kcal/mol (negative = favorable).
+    """
+    dh, ds = calculate_nn_thermodynamics(sequence, rna=rna)
+    t_kelvin = temperature + 273.15
+    # ΔS is in cal/(mol·K), ΔH is in kcal/mol → convert ΔS to kcal
+    dg = dh - (t_kelvin * ds / 1000.0)
+    return dg
