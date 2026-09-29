@@ -1254,3 +1254,97 @@ class VariantAnnotator:
             Annotations for each candidate.
         """
         return [self.annotate(start, end, chrom=chrom) for start, end in candidates]
+
+
+# ---------------------------------------------------------------------------
+# Variant scoring and risk classification
+# ---------------------------------------------------------------------------
+
+
+def score_variant_penalty(annotation: VariantAnnotation) -> float:
+    """Convert a VariantAnnotation penalty to a [0.0, 1.0] score.
+
+    Score = 1.0 - penalty (clamped). A score of 1.0 means no variants
+    (best), 0.0 means many variants (worst).
+
+    Parameters
+    ----------
+    annotation : VariantAnnotation
+        The annotation result.
+
+    Returns
+    -------
+    float
+        Variant score in [0.0, 1.0].
+    """
+    return max(0.0, 1.0 - annotation.penalty)
+
+
+def classify_variant_risk(
+    annotation: VariantAnnotation,
+    high_risk_threshold: float = 0.5,
+    moderate_risk_threshold: float = 0.2,
+) -> str:
+    """Classify variant risk for an ASO candidate.
+
+    Parameters
+    ----------
+    annotation : VariantAnnotation
+        The annotation result.
+    high_risk_threshold : float
+        Penalty at or above this is "high_risk" (default 0.5).
+    moderate_risk_threshold : float
+        Penalty at or above this (but below high) is "moderate_risk"
+        (default 0.2). Below this is "low_risk".
+
+    Returns
+    -------
+    str
+        One of "low_risk", "moderate_risk", or "high_risk".
+    """
+    if annotation.has_pathogenic:
+        return "high_risk"
+    if annotation.penalty >= high_risk_threshold:
+        return "high_risk"
+    elif annotation.penalty >= moderate_risk_threshold:
+        return "moderate_risk"
+    else:
+        return "low_risk"
+
+
+def filter_candidates_by_variants(
+    candidates: list[tuple[int, int]],
+    annotator: VariantAnnotator,
+    max_penalty: float = 1.0,
+    exclude_pathogenic: bool = False,
+    chrom: str = "",
+) -> list[tuple[int, int, VariantAnnotation]]:
+    """Filter ASO candidates by variant penalty.
+
+    Parameters
+    ----------
+    candidates : list[tuple[int, int]]
+        List of (start, end) positions.
+    annotator : VariantAnnotator
+        The annotator to use.
+    max_penalty : float
+        Maximum allowed penalty (default 1.0).
+    exclude_pathogenic : bool
+        If True, exclude candidates overlapping pathogenic variants.
+    chrom : str
+        Chromosome (if using genomic coordinates).
+
+    Returns
+    -------
+    list[tuple[int, int, VariantAnnotation]]
+        Filtered candidates with their annotations.
+    """
+    results: list[tuple[int, int, VariantAnnotation]] = []
+    for start, end in candidates:
+        ann = annotator.annotate(start, end, chrom=chrom)
+        if ann.penalty > max_penalty:
+            continue
+        if exclude_pathogenic and ann.has_pathogenic:
+            continue
+        results.append((start, end, ann))
+    return results
