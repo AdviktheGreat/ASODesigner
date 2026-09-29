@@ -400,3 +400,79 @@ class CandidateScore:
             "composite_score": round(self.composite_score.composite_score, 4),
             "chemistry_bonus": self.composite_score.chemistry_bonus,
         }
+
+
+# ---------------------------------------------------------------------------
+# Engine factory
+# ---------------------------------------------------------------------------
+
+
+def create_score_engine(
+    weights: dict[str, float] | None = None,
+    chemistry_bonus: float = 0.0,
+    register_all: bool = True,
+) -> ScoreEngine:
+    """Create a ScoreEngine with default or custom weights.
+
+    Parameters
+    ----------
+    weights : dict[str, float] or None
+        Custom weights. If None, loads from default config.
+    chemistry_bonus : float
+        Chemistry-specific bonus (default 0.0).
+    register_all : bool
+        If True, register all available score components
+        (accessibility, thermodynamics, gc_content, off_target,
+        variant, self_structure, positional). Components are
+        registered only if their corresponding modules are importable.
+
+    Returns
+    -------
+    ScoreEngine
+        Configured score engine with registered components.
+    """
+    if weights is None:
+        weights = _default_weights()
+
+    engine = ScoreEngine(weights=weights, chemistry_bonus=chemistry_bonus)
+
+    if register_all:
+        _register_default_components(engine)
+
+    return engine
+
+
+def _register_default_components(engine: ScoreEngine) -> None:
+    """Register all default score components with the engine.
+
+    Each component is imported and registered individually so that
+    missing modules don't prevent the engine from starting.
+    """
+    # Import and register each component
+    # Components are defined in Steps 33-34
+    try:
+        from aso_designer.scoring import (
+            AccessibilityScoreComponent,
+            GCContentScoreComponent,
+            OffTargetScoreComponent,
+            PositionalScoreComponent,
+            SelfStructureScoreComponent,
+            ThermodynamicsScoreComponent,
+            VariantScoreComponent,
+        )
+
+        for component_cls in [
+            AccessibilityScoreComponent,
+            ThermodynamicsScoreComponent,
+            GCContentScoreComponent,
+            OffTargetScoreComponent,
+            VariantScoreComponent,
+            SelfStructureScoreComponent,
+            PositionalScoreComponent,
+        ]:
+            try:
+                engine.register_component(component_cls())
+            except ScoringError as e:
+                logger.debug("Skipping component %s: %s", component_cls.__name__, e)
+    except ImportError:
+        logger.debug("Score components not yet implemented; engine has no components")
