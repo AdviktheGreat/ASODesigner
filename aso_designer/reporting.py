@@ -603,6 +603,11 @@ def generate_html_report(
         )
     html_parts.append("</div>")
 
+    # Score distribution chart
+    if report.candidates:
+        html_parts.append("<h2>Score Distribution</h2>")
+        html_parts.append(_generate_score_distribution_chart(report.candidates))
+
     # Candidate table
     html_parts.append("<h2>Ranked Candidates</h2>")
     if report.candidates:
@@ -754,4 +759,91 @@ def _generate_variant_table(details: list[dict[str, Any]]) -> str:
         )
     parts.append("</table>")
     parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _generate_score_distribution_chart(
+    candidates: list[dict[str, Any]],
+    n_bins: int = 10,
+) -> str:
+    """Generate an SVG histogram of final score distribution.
+
+    Parameters
+    ----------
+    candidates : list[dict]
+        Candidate dicts with 'final_score' key.
+    n_bins : int
+        Number of histogram bins (default 10).
+
+    Returns
+    -------
+    str
+        HTML string containing an inline SVG chart.
+    """
+    scores = [c.get("final_score", 0.0) for c in candidates]
+    if not scores:
+        return "<p>No scores to display.</p>"
+
+    # Build histogram bins
+    bin_width = 1.0 / n_bins
+    bins = [0] * n_bins
+    for s in scores:
+        idx = min(int(s / bin_width), n_bins - 1)
+        bins[idx] += 1
+
+    max_count = max(bins) if bins else 1
+    if max_count == 0:
+        max_count = 1
+
+    # SVG dimensions
+    chart_w = 600
+    chart_h = 200
+    bar_w = chart_w / n_bins
+    bar_gap = 4
+    bar_actual_w = bar_w - bar_gap
+    label_h = 20
+    svg_h = chart_h + label_h + 10
+
+    parts: list[str] = [
+        f'<svg width="{chart_w}" height="{svg_h}" '
+        f'viewBox="0 0 {chart_w} {svg_h}" '
+        'style="background:#fff;border-radius:8px;'
+        'box-shadow:0 1px 3px rgba(0,0,0,0.1)">',
+        # Y-axis label
+        '<text x="8" y="15" font-size="10" fill="#666">Count</text>',
+        # X-axis label
+        f'<text x="{chart_w - 60}" y="{svg_h - 4}" font-size="10" fill="#666">Score</text>',
+    ]
+
+    for i, count in enumerate(bins):
+        x = i * bar_w + bar_gap / 2
+        bar_h = (count / max_count) * (chart_h - 10) if count > 0 else 0
+        y = chart_h - bar_h
+        color = _score_color((i + 0.5) / n_bins)
+        color_hex = {
+            "score-high": "#4caf50",
+            "score-mid": "#ff9800",
+            "score-low": "#f44336",
+        }.get(color, "#4caf50")
+
+        parts.append(
+            f'<rect x="{x:.1f}" y="{y:.1f}" '
+            f'width="{bar_actual_w:.1f}" height="{bar_h:.1f}" '
+            f'fill="{color_hex}" rx="2" />'
+        )
+        if count > 0:
+            parts.append(
+                f'<text x="{x + bar_actual_w / 2:.1f}" y="{y - 4:.1f}" '
+                f'text-anchor="middle" font-size="9" fill="#333">{count}</text>'
+            )
+        # X-axis labels (score ranges)
+        lo = i * bin_width
+        hi = (i + 1) * bin_width
+        parts.append(
+            f'<text x="{x + bar_actual_w / 2:.1f}" y="{chart_h + 14}" '
+            f'text-anchor="middle" font-size="8" fill="#666">'
+            f"{lo:.1f}-{hi:.1f}</text>"
+        )
+
+    parts.append("</svg>")
     return "\n".join(parts)
