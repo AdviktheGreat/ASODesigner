@@ -642,3 +642,41 @@ def score_candidate(
         composite_score=composite,
         final_score=composite.final_score,
     )
+
+
+def score_candidates_batch(
+    candidates: list,
+    features_list: list[dict] | None = None,
+    engine: ScoreEngine | None = None,
+) -> list[CandidateScore]:
+    """Score multiple ASO candidates in batch.
+
+    Parameters
+    ----------
+    candidates : list[ASOCandidate]
+        List of candidates to score.
+    features_list : list[dict] or None
+        List of feature dicts (same length as candidates). If None,
+        all candidates get empty feature dicts.
+    engine : ScoreEngine or None
+        Score engine to use. If None, creates a default engine.
+
+    Returns
+    -------
+    list[CandidateScore]
+        Scored candidates in the same order as input.
+    """
+    if engine is None:
+        engine = create_score_engine()
+    if features_list is None:
+        features_list = [{}] * len(candidates)
+
+    if len(features_list) != len(candidates):
+        raise ScoringError(
+            f"features_list length {len(features_list)} != candidates length {len(candidates)}"
+        )
+
+    return [
+        score_candidate(cand, features, engine)
+        for cand, features in zip(candidates, features_list, strict=True)
+    ]
