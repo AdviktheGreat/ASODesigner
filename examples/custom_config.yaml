@@ -1,0 +1,67 @@
+# Custom ASODesigner configuration example.
+#
+# This file overrides the bundled defaults. Only specify the sections
+# you want to change; unspecified values use defaults.
+#
+# Usage:
+#   asodesigner design --target BRCA1 --config examples/custom_config.yaml
+
+# Candidate generation parameters
+candidate:
+  length: 18              # Shorter ASOs for tighter binding
+  step: 1                 # Every position
+  gc_min: 0.35            # Slightly higher GC minimum
+  gc_max: 0.55            # Slightly lower GC maximum
+  homopolymer_max: 3      # Stricter homopolymer filter
+  chemistry: gapmer
+
+# Gapmer-specific parameters
+gapmer:
+  dna_window_min: 8       # Minimum DNA gap
+  dna_window_max: 12      # Maximum DNA gap
+  wing_length_min: 3      # Minimum wing length
+  wing_length_max: 6      # Maximum wing length
+
+# Scoring weights (must sum to 1.0)
+# Emphasize accessibility and off-target specificity
+scoring:
+  weights:
+    accessibility: 0.30    # Increased from 0.25
+    thermodynamics: 0.15   # Decreased from 0.20
+    gc_content: 0.10
+    off_target: 0.25       # Increased from 0.20
+    variant: 0.10
+    self_structure: 0.05   # Decreased from 0.10
+    positional: 0.05
+
+# Reporting parameters
+reporting:
+  output_dir: results_custom
+  generate_html: true
+  include_offtarget_details: true
+
+# Accessibility parameters
+accessibility:
+  window_size: 70          # RNAplfold window
+  max_span: 100            # Max base pair span
+  cache_dir: .aso_cache    # Cache directory
+
+# Thermodynamics parameters
+thermodynamics:
+  temperature: 37.0        # Reference temperature (°C)
+  na_concentration: 0.1    # Sodium concentration (M)
+  mg_concentration: 0.0    # Magnesium concentration (M)
+  oligo_concentration: 1.0 # Oligo concentration (µM)
+
+# Off-target parameters
+off_target:
+  kmer_size: 12            # Seed k-mer size
+  seed_length: 8           # Seed region length
+  max_mismatches: 3        # Max total mismatches
+  max_seed_mismatches: 0   # Max seed mismatches (strict)
+
+# Variant parameters
+variant:
+  seed_penalty_multiplier: 2.0  # Seed region variant penalty multiplier
+  pathogenic_penalty: 0.5       # Fixed penalty for pathogenic variants
+  maf_weight: 0.3               # MAF-based penalty weight
