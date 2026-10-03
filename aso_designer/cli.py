@@ -429,6 +429,87 @@ def validate_output_dir(path: str) -> str:
     return str(p.resolve())
 
 
+def validate_input_file(path: str, description: str = "input file") -> str:
+    """Validate that an input file exists and is readable.
+
+    Parameters
+    ----------
+    path : str
+        Input file path.
+    description : str
+        Human-readable description for error messages.
+
+    Returns
+    -------
+    str
+        Normalized path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    """
+    from pathlib import Path
+
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"{description} not found: {path}")
+    if not p.is_file():
+        raise FileNotFoundError(f"{description} is not a file: {path}")
+    return str(p.resolve())
+
+
+def validate_target(target: str) -> str:
+    """Validate a target gene symbol or transcript accession.
+
+    Parameters
+    ----------
+    target : str
+        Gene symbol (e.g. "BRCA1") or accession (e.g. "NM_007294").
+
+    Returns
+    -------
+    str
+        Normalized target string (stripped, uppercased).
+
+    Raises
+    ------
+    ValueError
+        If the target is empty or contains invalid characters.
+    """
+    if not target or not target.strip():
+        raise ValueError("Target cannot be empty.")
+    normalized = target.strip().upper()
+    # Allow alphanumeric, dots, underscores, dashes (for accessions)
+    import re
+
+    if not re.match(r"^[A-Z0-9._-]+$", normalized):
+        raise ValueError(
+            f"Invalid target '{target}': use gene symbol (BRCA1) or accession (NM_007294)."
+        )
+    return normalized
+
+
+def is_accession(target: str) -> bool:
+    """Check if a target string looks like an NCBI accession.
+
+    Accessions match patterns like NM_001123, NR_123456, XM_456789.
+
+    Parameters
+    ----------
+    target : str
+        Target string.
+
+    Returns
+    -------
+    bool
+        True if the target looks like an accession.
+    """
+    import re
+
+    return bool(re.match(r"^[A-Z]{1,4}_\d+(\.\d+)?$", target.strip().upper()))
+
+
 # ---------------------------------------------------------------------------
 # Subcommand handlers (stubs — implemented in Step 43)
 # ---------------------------------------------------------------------------
