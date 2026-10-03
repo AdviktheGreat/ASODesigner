@@ -189,3 +189,100 @@ Candidates are classified by their thermodynamic profile:
 | Strong | $\Delta G_{net} < -10$ kcal/mol and Tm in optimal range |
 | Moderate | $-10 \leq \Delta G_{net} < -5$ kcal/mol |
 | Weak | $\Delta G_{net} \geq -5$ kcal/mol |
+
+## Off-target analysis
+
+### Transcriptome reference
+
+ASODesigner builds a `TranscriptomeReference` from a set of transcript
+sequences. A k-mer index (default k=12) is constructed for fast
+seed-based searching. Each transcript is stored with its accession,
+gene name, and sequence.
+
+### Seed-and-extend search
+
+For each ASO candidate, the search engine:
+
+1. **Seed extraction** — Extracts k-mers from the ASO's seed region
+   (default: first 8 nt, the most critical for RNase H recruitment)
+2. **Index lookup** — Finds transcriptome positions matching any seed
+   k-mer
+3. **Extension** — Extends each seed match to full-length alignment,
+   counting mismatches in seed and non-seed regions
+4. **Classification** — Classifies hits as perfect, seed-match, or
+   seed-mismatch
+
+### Hit filtering
+
+Hits are filtered by:
+- Maximum total mismatches (default 3)
+- Maximum seed mismatches (default 0 for strict seed filtering)
+- On-target exclusion (the intended target is excluded from
+  off-target counts)
+
+### Off-target scoring
+
+The off-target specificity score is computed as:
+
+$$\text{score} = \frac{1}{1 + \text{weighted\_hits}}$$
+
+Where `weighted_hits` sums penalties for each off-target hit:
+- Perfect match: weight 1.0
+- Seed match (0 seed mismatches, >0 total): weight 0.5
+- Seed mismatch: weight 0.2
+
+A score of 1.0 means no off-target hits (highly specific); 0.0 means
+many perfect-match off-targets.
+
+### Specificity classification
+
+| Class | Score Range |
+|---|---|
+| Specific | ≥ 0.8 |
+| Moderate | 0.5–0.8 |
+| Non-specific | < 0.5 |
+
+## Variant/SNP awareness
+
+### Variant data sources
+
+ASODesigner fetches variant data from:
+
+1. **dbSNP** — NCBI ESearch/ESummary API for known SNPs
+2. **ClinVar** — NCBI API for clinical significance
+3. **VCF files** — User-provided variant call format files
+
+The `VariantFetchManager` tries API sources first, then falls back to
+VCF. All variants are deduplicated by position and allele.
+
+### Variant annotation
+
+For each ASO candidate, the `VariantAnnotator` checks for overlapping
+variants:
+
+- **Position overlap** — Does any variant fall within the ASO binding
+  site (start to end)?
+- **Seed region** — Does any variant fall within the seed region
+  (first 8 nt)? Seed-region variants are penalized more heavily.
+- **Pathogenic flag** — Is any overlapping variant marked as
+  pathogenic or likely pathogenic in ClinVar?
+
+### Variant penalty
+
+The variant penalty combines:
+
+- **MAF-weighted penalty** — Common variants (high MAF) receive a
+  smaller penalty than rare variants
+- **Seed-region multiplier** — Variants in the seed region receive a
+  2× penalty multiplier
+- **Pathogenic bonus** — Pathogenic variants add a fixed penalty
+  regardless of MAF
+
+### Risk classification
+
+| Risk Level | Criteria |
+|---|---|
+| High risk | Pathogenic variant in seed region |
+| Moderate risk | Variant overlap in seed region, or pathogenic in non-seed |
+| Low risk | Variant overlap in non-seed region only |
+| No risk | No overlapping variants |
