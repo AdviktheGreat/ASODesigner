@@ -577,15 +577,76 @@ def print_success(message: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Subcommand handlers (stubs — implemented in Step 43)
+# Subcommand handlers
 # ---------------------------------------------------------------------------
 
 
 def _handle_design(args: argparse.Namespace) -> int:
-    """Handle the 'design' subcommand."""
-    logger.info("Design command not yet implemented")
-    print("Design command is not yet implemented. See Step 43.")
-    return 0
+    """Handle the 'design' subcommand — full pipeline."""
+    from aso_designer.pipeline import ASOPipeline, PipelineConfig
+
+    # Validate target
+    try:
+        target = validate_target(args.target)
+    except ValueError as e:
+        print_error(str(e))
+        return 1
+
+    # Validate local FASTA if provided
+    local_fasta = None
+    if args.local_fasta:
+        try:
+            local_fasta = validate_input_file(args.local_fasta, "FASTA file")
+        except FileNotFoundError as e:
+            print_error(str(e))
+            return 1
+
+    # Build pipeline config
+    config = PipelineConfig.from_args(args)
+    config.target = target
+    config.local_fasta = local_fasta
+
+    print_banner("ASODesigner — Design Pipeline")
+    print_progress("CONFIG", f"Target: {target}, Chemistry: {config.chemistry}")
+    print_progress("CONFIG", f"Output: {config.output_dir}")
+
+    # Run pipeline
+    pipeline = ASOPipeline(config)
+    result = pipeline.run()
+
+    # Display results
+    print_banner("Pipeline Results")
+    print_summary_box(
+        "Summary",
+        {
+            "target": result.target,
+            "transcript_id": result.transcript_id,
+            "transcript_length": result.transcript_length,
+            "total_candidates": result.total_candidates,
+            "passed_filters": result.passed_filters,
+            "ranked_candidates": result.ranked_candidates,
+            "top_score": result.top_score,
+        },
+    )
+
+    if result.errors:
+        print()
+        print("  Warnings/Errors:")
+        for err in result.errors:
+            print(f"    ! {err}")
+
+    if result.report_paths:
+        print()
+        print("  Reports generated:")
+        for fmt, path in result.report_paths.items():
+            print(f"    {fmt.upper():>6}: {path}")
+
+    if result.success:
+        print_success("Pipeline completed successfully.")
+        return 0
+    else:
+        print_error("Pipeline did not produce ranked candidates.")
+        return 1
 
 
 def _handle_score(args: argparse.Namespace) -> int:
