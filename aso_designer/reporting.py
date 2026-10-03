@@ -979,3 +979,130 @@ def generate_report_from_ranking(
         generate_json=generate_json,
         generate_html=generate_html,
     )
+
+
+# ---------------------------------------------------------------------------
+# Report assembler: orchestrates pipeline output collection
+# ---------------------------------------------------------------------------
+
+
+class ReportAssembler:
+    """Collects pipeline results and assembles a ReportData.
+
+    Provides a fluent interface for incrementally adding results from
+    each pipeline stage (candidates, scoring, thermodynamics, off-target,
+    variant) and then assembling a complete report.
+
+    Parameters
+    ----------
+    target_name : str
+        Target gene name.
+    target_id : str
+        Target transcript accession.
+    chemistry : str
+        Chemistry used for this run.
+    """
+
+    def __init__(
+        self,
+        target_name: str = "",
+        target_id: str = "",
+        chemistry: str = "gapmer",
+    ):
+        self.target_name = target_name
+        self.target_id = target_id
+        self.chemistry = chemistry
+        self._total_candidates = 0
+        self._passed_filters = 0
+        self._scored_candidates: list = []
+        self._thermo_summaries: list | None = None
+        self._off_target_results: list | None = None
+        self._variant_annotations: list | None = None
+        self._metadata: dict[str, Any] = {}
+
+    def set_candidate_counts(
+        self,
+        total: int,
+        passed: int = 0,
+    ) -> ReportAssembler:
+        """Set candidate generation counts."""
+        self._total_candidates = total
+        self._passed_filters = passed
+        return self
+
+    def set_scored_candidates(self, candidates: list) -> ReportAssembler:
+        """Set scored and ranked candidates."""
+        self._scored_candidates = candidates
+        return self
+
+    def set_thermodynamic_summaries(
+        self,
+        summaries: list,
+    ) -> ReportAssembler:
+        """Set per-candidate thermodynamic summaries."""
+        self._thermo_summaries = summaries
+        return self
+
+    def set_off_target_results(
+        self,
+        results: list,
+    ) -> ReportAssembler:
+        """Set per-candidate off-target results."""
+        self._off_target_results = results
+        return self
+
+    def set_variant_annotations(
+        self,
+        annotations: list,
+    ) -> ReportAssembler:
+        """Set per-candidate variant annotations."""
+        self._variant_annotations = annotations
+        return self
+
+    def add_metadata(self, key: str, value: Any) -> ReportAssembler:
+        """Add a metadata key-value pair."""
+        self._metadata[key] = value
+        return self
+
+    def set_metadata(self, metadata: dict[str, Any]) -> ReportAssembler:
+        """Replace all metadata."""
+        self._metadata = dict(metadata)
+        return self
+
+    def assemble(
+        self,
+        include_thermo: bool = True,
+        include_offtarget: bool = True,
+        include_variant: bool = True,
+    ) -> ReportData:
+        """Assemble all collected data into a ReportData.
+
+        Parameters
+        ----------
+        include_thermo : bool
+            Include thermodynamic detail section.
+        include_offtarget : bool
+            Include off-target detail section.
+        include_variant : bool
+            Include variant detail section.
+
+        Returns
+        -------
+        ReportData
+            Complete report data.
+        """
+        return build_report_data(
+            scored_candidates=self._scored_candidates,
+            total_candidates=self._total_candidates,
+            passed_filters=self._passed_filters,
+            target_name=self.target_name,
+            target_id=self.target_id,
+            chemistry=self.chemistry,
+            thermodynamic_summaries=self._thermo_summaries,
+            off_target_results=self._off_target_results,
+            variant_annotations=self._variant_annotations,
+            metadata=self._metadata,
+            include_thermo_details=include_thermo,
+            include_offtarget_details=include_offtarget,
+            include_variant_details=include_variant,
+        )
