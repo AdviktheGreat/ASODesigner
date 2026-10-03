@@ -968,3 +968,34 @@ def rank_candidates(
     for i, cand in enumerate(sorted_scored):
         cand.rank = i + 1
     return sorted_scored
+
+
+def filter_by_score(
+    scored: list[CandidateScore],
+    min_score: float = 0.0,
+    max_score: float = 1.0,
+    top_n: int | None = None,
+) -> list[CandidateScore]:
+    """Filter scored candidates by score thresholds.
+
+    Parameters
+    ----------
+    scored : list[CandidateScore]
+        Scored candidates.
+    min_score : float
+        Minimum final score to keep (default 0.0).
+    max_score : float
+        Maximum final score to keep (default 1.0).
+    top_n : int or None
+        If set, keep only the top N candidates by score.
+
+    Returns
+    -------
+    list[CandidateScore]
+        Filtered candidates (not re-ranked).
+    """
+    filtered = [c for c in scored if min_score <= c.final_score <= max_score]
+    if top_n is not None and top_n > 0:
+        filtered = sorted(filtered, key=lambda c: c.final_score, reverse=True)
+        filtered = filtered[:top_n]
+    return filtered
