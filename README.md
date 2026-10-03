@@ -8,6 +8,20 @@ accessibility analysis, thermodynamic feature computation, transcriptome-wide
 off-target screening, variant/SNP awareness, and interpretable multi-factor
 candidate scoring.
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Scoring](#scoring)
+- [Testing](#testing)
+- [Programmatic Usage](#programmatic-usage)
+- [Contributing](#contributing)
+- [Disclaimer](#disclaimer)
+- [License](#license)
+
 ## Features
 
 - **Transcript fetching** — retrieve target mRNA sequences from NCBI RefSeq
@@ -318,6 +332,32 @@ ctx = ScoreContext(
 result = engine.score(ctx)
 print(f"Final score: {result.final_score:.4f}")
 ```
+
+## Contributing
+
+### Development setup
+
+```bash
+git clone https://github.com/AdviktheGreat/ASODesigner.git
+cd ASODesigner
+pip install -e ".[dev]"
+```
+
+### Code style
+
+- Linting: `ruff check aso_designer/ tests/`
+- Formatting: `ruff format aso_designer/ tests/`
+- Tests: `pytest`
+
+All code must pass `ruff check`, `ruff format --check`, and `pytest`
+before committing.
+
+### Project structure
+
+The codebase follows a 52-step implementation plan across 12 phases.
+Each module is self-contained with its own test file. See
+`docs/METHODOLOGY.md` for the scientific approach and `docs/API.md`
+for the module API reference.
 
 ## Disclaimer
 
