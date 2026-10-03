@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -230,3 +231,79 @@ def load_json_report(input_path: str | Path) -> ReportData:
 
     data = json.loads(input_path.read_text(encoding="utf-8"))
     return ReportData.from_dict(data)
+
+
+# ---------------------------------------------------------------------------
+# Summary statistics computation
+# ---------------------------------------------------------------------------
+
+
+def compute_summary_statistics(
+    scored_candidates: list,
+    total_candidates: int = 0,
+    passed_filters: int = 0,
+    target_name: str = "",
+    target_id: str = "",
+    chemistry: str = "gapmer",
+) -> ReportSummary:
+    """Compute summary statistics from scored candidates.
+
+    Parameters
+    ----------
+    scored_candidates : list[CandidateScore]
+        Scored and ranked candidates (from rank_candidates).
+    total_candidates : int
+        Total candidates generated before filtering.
+    passed_filters : int
+        Candidates that passed pre-filters.
+    target_name : str
+        Target gene name.
+    target_id : str
+        Target transcript accession.
+    chemistry : str
+        Chemistry used for this run.
+
+    Returns
+    -------
+    ReportSummary
+        Computed summary statistics.
+    """
+    n = len(scored_candidates)
+
+    if n == 0:
+        return ReportSummary(
+            target_name=target_name,
+            target_id=target_id,
+            total_candidates=total_candidates,
+            passed_filters=passed_filters,
+            scored_candidates=0,
+            ranked_candidates=0,
+            chemistry=chemistry,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
+    scores = sorted(c.final_score for c in scored_candidates)
+    top = scores[-1]
+    min_s = scores[0]
+    mean = sum(scores) / n
+
+    mid = n // 2
+    if n % 2 == 0:
+        median = (scores[mid - 1] + scores[mid]) / 2
+    else:
+        median = scores[mid]
+
+    return ReportSummary(
+        target_name=target_name,
+        target_id=target_id,
+        total_candidates=total_candidates if total_candidates else n,
+        passed_filters=passed_filters if passed_filters else n,
+        scored_candidates=n,
+        ranked_candidates=n,
+        top_score=top,
+        median_score=median,
+        mean_score=mean,
+        min_score=min_s,
+        chemistry=chemistry,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
