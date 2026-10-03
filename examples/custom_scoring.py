@@ -10,7 +10,6 @@ Usage:
 
 from aso_designer.candidate import ASOCandidate
 from aso_designer.scoring import (
-    ScoreContext,
     create_score_engine,
     rank_and_filter,
     score_candidates_batch,
@@ -112,7 +111,7 @@ def main() -> None:
     # Show component breakdown for the top candidate
     if ranking.candidates:
         top = ranking.candidates[0]
-        print(f"\nTop candidate component breakdown:")
+        print("\nTop candidate component breakdown:")
         for name, score in top.component_scores.items():
             print(f"  {name:<20} {score:.4f}")
 

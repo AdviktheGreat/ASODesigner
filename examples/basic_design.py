@@ -15,8 +15,8 @@ from aso_designer.pipeline import run_pipeline
 def main() -> None:
     """Run a basic ASO design pipeline."""
     # Create a test FASTA file (in practice, use a real transcript)
-    import tempfile
     import os
+    import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Write a test transcript
@@ -44,7 +44,7 @@ def main() -> None:
         )
 
         # Display results
-        print(f"\nPipeline complete!")
+        print("\nPipeline complete!")
         print(f"  Target:          {result.target}")
         print(f"  Transcript:      {result.transcript_id} ({result.transcript_length} bp)")
         print(f"  Total candidates: {result.total_candidates}")

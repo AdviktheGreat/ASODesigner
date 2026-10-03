@@ -19,8 +19,8 @@ from aso_designer.utils.sequence import gc_content, validate_sequence
 
 def main() -> None:
     """Use individual modules to build a custom pipeline."""
-    import tempfile
     import os
+    import tempfile
 
     # 1. Load configuration
     config = load_config(chemistry="gapmer")
@@ -43,7 +43,7 @@ def main() -> None:
     print(f"Generated {len(candidates)} candidates")
 
     # 4. Apply pre-filters
-    filter_result = run_all_filters(
+    run_all_filters(
         candidates,
         gc_min=config.candidate.gc_min,
         gc_max=config.candidate.gc_max,
@@ -66,10 +66,7 @@ def main() -> None:
     print("Top 5 Candidates:")
     print("-" * 70)
     for c in ranking.candidates:
-        print(
-            f"  Rank {c.rank}: {c.sequence} "
-            f"(pos {c.start}-{c.end}, score={c.final_score:.4f})"
-        )
+        print(f"  Rank {c.rank}: {c.sequence} (pos {c.start}-{c.end}, score={c.final_score:.4f})")
     print()
 
     # 7. Generate reports
