@@ -847,3 +847,55 @@ def _generate_score_distribution_chart(
 
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Combined report generation
+# ---------------------------------------------------------------------------
+
+
+def generate_report(
+    report: ReportData,
+    output_dir: str | Path,
+    basename: str = "aso_report",
+    generate_json: bool = True,
+    generate_html: bool = True,
+    title: str = "ASODesigner Report",
+) -> dict[str, Path]:
+    """Generate both JSON and HTML reports from ReportData.
+
+    Parameters
+    ----------
+    report : ReportData
+        Complete report data.
+    output_dir : str or Path
+        Directory for output files.
+    basename : str
+        Base filename (without extension).
+    generate_json : bool
+        Write JSON report (default True).
+    generate_html : bool
+        Write HTML report (default True).
+    title : str
+        HTML page title.
+
+    Returns
+    -------
+    dict[str, Path]
+        Maps format ('json', 'html') to output file path.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    paths: dict[str, Path] = {}
+
+    if generate_json:
+        json_path = output_dir / f"{basename}.json"
+        paths["json"] = generate_json_report(report, json_path)
+
+    if generate_html:
+        html_path = output_dir / f"{basename}.html"
+        paths["html"] = generate_html_report(report, html_path, title=title)
+
+    logger.info("Reports generated in %s: %s", output_dir, list(paths.keys()))
+    return paths
