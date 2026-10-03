@@ -476,3 +476,98 @@ def _register_default_components(engine: ScoreEngine) -> None:
                 logger.debug("Skipping component %s: %s", component_cls.__name__, e)
     except ImportError:
         logger.debug("Score components not yet implemented; engine has no components")
+
+
+# ---------------------------------------------------------------------------
+# Core score components
+# ---------------------------------------------------------------------------
+
+
+class AccessibilityScoreComponent:
+    """Scores candidates by target RNA accessibility.
+
+    Uses the pre-computed accessibility score from the accessibility
+    module (RNAplfold-based windowed unpaired probability aggregation).
+    A score of 1.0 means the target site is fully accessible (unpaired).
+
+    If accessibility was not computed, returns a neutral 0.5 score.
+    """
+
+    @property
+    def name(self) -> str:
+        return "accessibility"
+
+    def score(self, context: ScoreContext) -> float:
+        if context.accessibility_score < 0:
+            logger.debug("Accessibility not computed; using neutral 0.5")
+            return 0.5
+        return context.accessibility_score
+
+
+class ThermodynamicsScoreComponent:
+    """Scores candidates by thermodynamic profile.
+
+    Combines Tm score and binding class into a single score:
+    - Tm score (0–1) weighted by 0.6
+    - Binding class score (strong=1.0, moderate=0.5, weak=0.0) weighted by 0.4
+
+    If thermodynamics were not computed, returns a neutral 0.5 score.
+    """
+
+    _BINDING_CLASS_SCORES = {"strong": 1.0, "moderate": 0.5, "weak": 0.0}
+
+    @property
+    def name(self) -> str:
+        return "thermodynamics"
+
+    def score(self, context: ScoreContext) -> float:
+        if context.tm_score < 0:
+            logger.debug("Thermodynamics not computed; using neutral 0.5")
+            return 0.5
+
+        tm_component = context.tm_score * 0.6
+        binding_score = self._BINDING_CLASS_SCORES.get(context.binding_class, 0.5)
+        binding_component = binding_score * 0.4
+
+        return tm_component + binding_component
+
+
+class GCContentScoreComponent:
+    """Scores candidates by GC content.
+
+    Optimal GC range is 30–60%. Scores:
+    - 1.0 if GC is in [0.3, 0.6]
+    - Linear decrease to 0.0 at GC=0.0 or GC=1.0
+
+    Parameters
+    ----------
+    gc_min : float
+        Minimum optimal GC fraction (default 0.30).
+    gc_max : float
+        Maximum optimal GC fraction (default 0.60).
+    """
+
+    def __init__(self, gc_min: float = 0.30, gc_max: float = 0.60):
+        self.gc_min = gc_min
+        self.gc_max = gc_max
+
+    @property
+    def name(self) -> str:
+        return "gc_content"
+
+    def score(self, context: ScoreContext) -> float:
+        gc = context.gc_content
+
+        if self.gc_min <= gc <= self.gc_max:
+            return 1.0
+
+        if gc < self.gc_min:
+            # Linear decrease from gc_min (1.0) to 0.0 (0.0)
+            if self.gc_min == 0:
+                return 0.0
+            return gc / self.gc_min
+        else:
+            # Linear decrease from gc_max (1.0) to 1.0 (0.0)
+            if self.gc_max == 1.0:
+                return 0.0
+            return (1.0 - gc) / (1.0 - self.gc_max)
