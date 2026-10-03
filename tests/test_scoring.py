@@ -321,3 +321,156 @@ class TestGCContentScoreComponent:
         comp = GCContentScoreComponent(gc_min=0.40, gc_max=0.50)
         ctx = ScoreContext(gc_content=0.45)
         assert comp.score(ctx) == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# OffTargetScoreComponent
+# ---------------------------------------------------------------------------
+
+
+class TestOffTargetScoreComponent:
+    def test_name(self):
+        assert OffTargetScoreComponent().name == "off_target"
+
+    def test_computed_score(self):
+        comp = OffTargetScoreComponent()
+        ctx = ScoreContext(off_target_score=0.95)
+        assert comp.score(ctx) == pytest.approx(0.95)
+
+    def test_not_computed_neutral(self):
+        comp = OffTargetScoreComponent()
+        ctx = ScoreContext(off_target_score=-1.0)
+        assert comp.score(ctx) == pytest.approx(0.5)
+
+    def test_zero_score(self):
+        comp = OffTargetScoreComponent()
+        ctx = ScoreContext(off_target_score=0.0)
+        assert comp.score(ctx) == pytest.approx(0.0)
+
+    def test_perfect_score(self):
+        comp = OffTargetScoreComponent()
+        ctx = ScoreContext(off_target_score=1.0)
+        assert comp.score(ctx) == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# VariantScoreComponent
+# ---------------------------------------------------------------------------
+
+
+class TestVariantScoreComponent:
+    def test_name(self):
+        assert VariantScoreComponent().name == "variant"
+
+    def test_no_variants(self):
+        comp = VariantScoreComponent()
+        ctx = ScoreContext(variant_penalty=0.0, variant_risk="none")
+        assert comp.score(ctx) == pytest.approx(1.0)
+
+    def test_no_data(self):
+        comp = VariantScoreComponent()
+        ctx = ScoreContext(variant_risk="")
+        assert comp.score(ctx) == pytest.approx(1.0)
+
+    def test_moderate_penalty(self):
+        comp = VariantScoreComponent()
+        ctx = ScoreContext(variant_penalty=0.3, variant_risk="moderate_risk")
+        assert comp.score(ctx) == pytest.approx(0.7)
+
+    def test_heavy_penalty(self):
+        comp = VariantScoreComponent()
+        ctx = ScoreContext(variant_penalty=0.8, variant_risk="high_risk")
+        assert comp.score(ctx) == pytest.approx(0.2)
+
+    def test_full_penalty_clamped(self):
+        comp = VariantScoreComponent()
+        ctx = ScoreContext(variant_penalty=1.5, variant_risk="high_risk")
+        assert comp.score(ctx) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# SelfStructureScoreComponent
+# ---------------------------------------------------------------------------
+
+
+class TestSelfStructureScoreComponent:
+    def test_name(self):
+        assert SelfStructureScoreComponent().name == "self_structure"
+
+    def test_no_data(self):
+        comp = SelfStructureScoreComponent()
+        ctx = ScoreContext(self_structure_penalty=0.0, dg_self=0.0)
+        assert comp.score(ctx) == pytest.approx(1.0)
+
+    def test_moderate_penalty(self):
+        comp = SelfStructureScoreComponent()
+        ctx = ScoreContext(self_structure_penalty=0.4, dg_self=-2.0)
+        assert comp.score(ctx) == pytest.approx(0.6)
+
+    def test_heavy_penalty(self):
+        comp = SelfStructureScoreComponent()
+        ctx = ScoreContext(self_structure_penalty=0.7, dg_self=-5.0)
+        assert comp.score(ctx) == pytest.approx(0.3)
+
+    def test_full_penalty_clamped(self):
+        comp = SelfStructureScoreComponent()
+        ctx = ScoreContext(self_structure_penalty=1.5, dg_self=-10.0)
+        assert comp.score(ctx) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# PositionalScoreComponent
+# ---------------------------------------------------------------------------
+
+
+class TestPositionalScoreComponent:
+    def test_name(self):
+        assert PositionalScoreComponent().name == "positional"
+
+    def test_cds_region(self):
+        comp = PositionalScoreComponent()
+        ctx = ScoreContext(region="CDS", start=0, end=20, length=20, transcript_length=100)
+        assert comp.score(ctx) >= 1.0  # CDS gets 1.0, plus position bonus
+
+    def test_5utr_region(self):
+        comp = PositionalScoreComponent()
+        ctx = ScoreContext(region="5UTR", start=0, end=20, length=20, transcript_length=1000)
+        score = comp.score(ctx)
+        assert 0.7 <= score <= 0.8  # 0.7 base + position bonus
+
+    def test_3utr_region(self):
+        comp = PositionalScoreComponent()
+        ctx = ScoreContext(region="3UTR", start=0, end=20, length=20, transcript_length=1000)
+        score = comp.score(ctx)
+        assert 0.5 <= score <= 0.6  # 0.5 base + position bonus
+
+    def test_unknown_region(self):
+        comp = PositionalScoreComponent()
+        ctx = ScoreContext(region="unknown", start=0, end=20, length=20, transcript_length=1000)
+        score = comp.score(ctx)
+        assert 0.3 <= score <= 0.4  # 0.3 base + position bonus
+
+    def test_center_bonus(self):
+        comp = PositionalScoreComponent(position_bonus=0.1)
+        # Candidate at center of transcript
+        ctx_center = ScoreContext(
+            region="CDS", start=490, end=510, length=20, transcript_length=1000
+        )
+        # Candidate at edge
+        ctx_edge = ScoreContext(region="CDS", start=0, end=20, length=20, transcript_length=1000)
+        center_score = comp.score(ctx_center)
+        edge_score = comp.score(ctx_edge)
+        assert center_score >= edge_score
+
+    def test_custom_region_weights(self):
+        comp = PositionalScoreComponent(
+            region_weights={"CDS": 0.9, "5UTR": 0.5},
+            position_bonus=0.0,
+        )
+        ctx = ScoreContext(region="CDS", start=0, end=20, length=20, transcript_length=100)
+        assert comp.score(ctx) == pytest.approx(0.9)
+
+    def test_no_transcript_length(self):
+        comp = PositionalScoreComponent(position_bonus=0.1)
+        ctx = ScoreContext(region="CDS", start=0, end=20, length=20, transcript_length=0)
+        assert comp.score(ctx) == pytest.approx(1.0)
