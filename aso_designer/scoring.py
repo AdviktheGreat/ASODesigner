@@ -1078,3 +1078,34 @@ def rank_and_filter(
         median_score=median,
         candidates=ranked,
     )
+
+
+def score_rank_and_filter(
+    candidates: list,
+    features_list: list[dict] | None = None,
+    engine: ScoreEngine | None = None,
+    min_score: float = 0.0,
+    top_n: int | None = None,
+) -> RankingResult:
+    """End-to-end: score, rank, and filter candidates in one call.
+
+    Parameters
+    ----------
+    candidates : list[ASOCandidate]
+        Candidates to score.
+    features_list : list[dict] or None
+        Feature dicts for each candidate.
+    engine : ScoreEngine or None
+        Score engine (default: from config).
+    min_score : float
+        Minimum score to keep (default 0.0).
+    top_n : int or None
+        Keep only top N after filtering.
+
+    Returns
+    -------
+    RankingResult
+        Ranking summary with scored, ranked, and filtered candidates.
+    """
+    scored = score_candidates_batch(candidates, features_list, engine)
+    return rank_and_filter(scored, min_score=min_score, top_n=top_n)
