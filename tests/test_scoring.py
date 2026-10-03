@@ -2,11 +2,15 @@
 
 import pytest
 
+from aso_designer.candidate import ASOCandidate
 from aso_designer.scoring import (
     AccessibilityScoreComponent,
+    CandidateScore,
+    CompositeScore,
     GCContentScoreComponent,
     OffTargetScoreComponent,
     PositionalScoreComponent,
+    RankingResult,
     ScoreComponent,
     ScoreContext,
     ScoreEngine,
@@ -15,8 +19,17 @@ from aso_designer.scoring import (
     SelfStructureScoreComponent,
     ThermodynamicsScoreComponent,
     VariantScoreComponent,
+    build_features_dict,
+    create_engine_from_config,
     create_score_engine,
+    filter_by_score,
+    rank_and_filter,
+    rank_candidates,
+    score_candidate,
+    score_candidates_batch,
+    score_rank_and_filter,
 )
+from aso_designer.thermodynamics import ThermodynamicSummary
 
 # ---------------------------------------------------------------------------
 # ScoreContext
@@ -474,3 +487,438 @@ class TestPositionalScoreComponent:
         comp = PositionalScoreComponent(position_bonus=0.1)
         ctx = ScoreContext(region="CDS", start=0, end=20, length=20, transcript_length=0)
         assert comp.score(ctx) == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# score_candidate
+# ---------------------------------------------------------------------------
+
+
+class TestScoreCandidate:
+    def test_basic(self):
+        cand = ASOCandidate(
+            sequence="ATGCATGCATGCATGCATGC",
+            start=100,
+            end=120,
+            length=20,
+            chemistry="gapmer",
+            gc_content=0.5,
+            region="CDS",
+        )
+        features = {
+            "accessibility_score": 0.8,
+            "tm_score": 0.9,
+            "binding_class": "strong",
+            "off_target_score": 0.95,
+            "variant_penalty": 0.2,
+            "variant_risk": "moderate",
+            "self_structure_penalty": 0.3,
+            "dg_self": -2.0,
+            "transcript_length": 2000,
+        }
+        result = score_candidate(cand, features)
+        assert result.sequence == "ATGCATGCATGCATGCATGC"
+        assert result.start == 100
+        assert result.end == 120
+        assert result.chemistry == "gapmer"
+        assert 0.0 < result.final_score <= 1.0
+        assert result.rank is None
+
+    def test_empty_features(self):
+        cand = ASOCandidate(
+            sequence="ATGCATGCATGCATGCATGC",
+            start=0,
+            end=20,
+            length=20,
+            gc_content=0.5,
+            region="CDS",
+        )
+        result = score_candidate(cand)
+        assert 0.0 < result.final_score <= 1.0
+
+    def test_custom_engine(self):
+        cand = ASOCandidate(
+            sequence="ATGC",
+            start=0,
+            end=4,
+            length=4,
+            gc_content=0.5,
+        )
+        engine = create_score_engine(weights={"gc_content": 1.0})
+        result = score_candidate(cand, engine=engine)
+        assert result.final_score == pytest.approx(1.0)
+
+    def test_component_scores(self):
+        cand = ASOCandidate(
+            sequence="ATGCATGCATGCATGCATGC",
+            start=0,
+            end=20,
+            length=20,
+            gc_content=0.5,
+            region="CDS",
+        )
+        features = {"accessibility_score": 0.8, "tm_score": 0.9, "binding_class": "strong"}
+        result = score_candidate(cand, features)
+        assert "accessibility" in result.component_scores
+        assert "thermodynamics" in result.component_scores
+        assert "gc_content" in result.component_scores
+
+    def test_to_dict(self):
+        cand = ASOCandidate(
+            sequence="ATGC",
+            start=0,
+            end=4,
+            length=4,
+            gc_content=0.5,
+        )
+        result = score_candidate(cand)
+        d = result.to_dict()
+        assert d["sequence"] == "ATGC"
+        assert d["start"] == 0
+        assert d["end"] == 4
+        assert "final_score" in d
+        assert "component_scores" in d
+
+
+# ---------------------------------------------------------------------------
+# score_candidates_batch
+# ---------------------------------------------------------------------------
+
+
+class TestScoreCandidatesBatch:
+    def test_basic(self):
+        cands = [
+            ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20, gc_content=0.5, region="CDS"),
+            ASOCandidate("GCGCGCGCGCGCGCGCGCGC", 20, 40, 20, gc_content=1.0, region="3UTR"),
+        ]
+        features = [
+            {"accessibility_score": 0.8, "tm_score": 0.9, "binding_class": "strong"},
+            {"accessibility_score": 0.3, "tm_score": 0.5, "binding_class": "moderate"},
+        ]
+        results = score_candidates_batch(cands, features)
+        assert len(results) == 2
+        assert results[0].sequence != results[1].sequence
+
+    def test_no_features(self):
+        cands = [
+            ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20, gc_content=0.5),
+            ASOCandidate("GCGCGCGCGCGCGCGCGCGC", 20, 40, 20, gc_content=1.0),
+        ]
+        results = score_candidates_batch(cands)
+        assert len(results) == 2
+
+    def test_length_mismatch_raises(self):
+        cands = [ASOCandidate("ATGC", 0, 4, 4, gc_content=0.5)]
+        with pytest.raises(ScoringError, match="length"):
+            score_candidates_batch(cands, [{}, {}])
+
+    def test_custom_engine(self):
+        cands = [
+            ASOCandidate("ATGC", 0, 4, 4, gc_content=0.5),
+        ]
+        engine = create_score_engine(weights={"gc_content": 1.0})
+        results = score_candidates_batch(cands, engine=engine)
+        assert results[0].final_score == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# build_features_dict
+# ---------------------------------------------------------------------------
+
+
+class TestBuildFeaturesDict:
+    def test_from_thermodynamic_summary(self):
+        thermo = ThermodynamicSummary(
+            tm=55.0,
+            tm_score=0.8,
+            dg_duplex=-15.0,
+            dg_self=-2.0,
+            dg_target=-3.0,
+            dg_net=-10.0,
+            binding_class="strong",
+            self_structure_penalty=0.5,
+        )
+        features = build_features_dict(
+            thermo_summary=thermo,
+            accessibility_score=0.7,
+            transcript_length=2000,
+        )
+        assert features["tm"] == 55.0
+        assert features["tm_score"] == 0.8
+        assert features["dg_duplex"] == -15.0
+        assert features["binding_class"] == "strong"
+        assert features["self_structure_penalty"] == 0.5
+        assert features["accessibility_score"] == 0.7
+        assert features["transcript_length"] == 2000
+
+    def test_empty(self):
+        features = build_features_dict()
+        assert features["accessibility_score"] == -1.0
+        assert features["transcript_length"] == 0
+
+    def test_with_off_target_tuple(self):
+        features = build_features_dict(off_target_result=(None, 0.85, "specific"))
+        assert features["off_target_score"] == pytest.approx(0.85)
+
+    def test_only_accessibility(self):
+        features = build_features_dict(accessibility_score=0.9)
+        assert features["accessibility_score"] == pytest.approx(0.9)
+        assert "tm" not in features
+
+
+# ---------------------------------------------------------------------------
+# create_engine_from_config
+# ---------------------------------------------------------------------------
+
+
+class TestCreateEngineFromConfig:
+    def test_default_config(self):
+        engine = create_engine_from_config()
+        assert len(engine._components) == 7
+        assert "accessibility" in engine._components
+
+    def test_with_chemistry(self):
+        engine = create_engine_from_config(chemistry="gapmer")
+        assert len(engine._components) == 7
+
+    def test_custom_config_path(self):
+        engine = create_engine_from_config(
+            config_path="aso_designer/config/aso_config.yaml",
+            chemistry="mixmer",
+        )
+        assert len(engine._components) == 7
+
+
+# ---------------------------------------------------------------------------
+# rank_candidates
+# ---------------------------------------------------------------------------
+
+
+def _make_scored(score: float, seq: str = "ATGC") -> CandidateScore:
+    """Helper: build a CandidateScore with a given final score."""
+    return CandidateScore(
+        sequence=seq,
+        start=0,
+        end=20,
+        chemistry="gapmer",
+        composite_score=CompositeScore(
+            component_results=[],
+            composite_score=score,
+            chemistry_bonus=0.0,
+            final_score=score,
+        ),
+        final_score=score,
+    )
+
+
+class TestRankCandidates:
+    def test_basic_descending(self):
+        scored = [
+            _make_scored(0.5, "BBB"),
+            _make_scored(0.9, "AAA"),
+            _make_scored(0.3, "CCC"),
+        ]
+        ranked = rank_candidates(scored)
+        assert ranked[0].sequence == "AAA"
+        assert ranked[1].sequence == "BBB"
+        assert ranked[2].sequence == "CCC"
+        assert ranked[0].rank == 1
+        assert ranked[1].rank == 2
+        assert ranked[2].rank == 3
+
+    def test_ascending(self):
+        scored = [
+            _make_scored(0.5, "BBB"),
+            _make_scored(0.9, "AAA"),
+            _make_scored(0.3, "CCC"),
+        ]
+        ranked = rank_candidates(scored, descending=False)
+        assert ranked[0].sequence == "CCC"
+        assert ranked[0].rank == 1
+
+    def test_empty(self):
+        ranked = rank_candidates([])
+        assert ranked == []
+
+    def test_single(self):
+        scored = [_make_scored(0.8, "AAA")]
+        ranked = rank_candidates(scored)
+        assert len(ranked) == 1
+        assert ranked[0].rank == 1
+
+    def test_ties(self):
+        scored = [
+            _make_scored(0.5, "AAA"),
+            _make_scored(0.5, "BBB"),
+        ]
+        ranked = rank_candidates(scored)
+        assert ranked[0].rank == 1
+        assert ranked[1].rank == 2
+
+
+# ---------------------------------------------------------------------------
+# filter_by_score
+# ---------------------------------------------------------------------------
+
+
+class TestFilterByScore:
+    def test_min_score(self):
+        scored = [
+            _make_scored(0.9, "A"),
+            _make_scored(0.5, "B"),
+            _make_scored(0.3, "C"),
+        ]
+        filtered = filter_by_score(scored, min_score=0.4)
+        assert len(filtered) == 2
+        assert all(c.final_score >= 0.4 for c in filtered)
+
+    def test_max_score(self):
+        scored = [
+            _make_scored(0.9, "A"),
+            _make_scored(0.5, "B"),
+            _make_scored(0.3, "C"),
+        ]
+        filtered = filter_by_score(scored, max_score=0.6)
+        assert len(filtered) == 2
+        assert all(c.final_score <= 0.6 for c in filtered)
+
+    def test_top_n(self):
+        scored = [
+            _make_scored(0.9, "A"),
+            _make_scored(0.5, "B"),
+            _make_scored(0.3, "C"),
+        ]
+        filtered = filter_by_score(scored, top_n=2)
+        assert len(filtered) == 2
+        assert filtered[0].final_score == pytest.approx(0.9)
+        assert filtered[1].final_score == pytest.approx(0.5)
+
+    def test_no_filter(self):
+        scored = [
+            _make_scored(0.9, "A"),
+            _make_scored(0.5, "B"),
+        ]
+        filtered = filter_by_score(scored)
+        assert len(filtered) == 2
+
+    def test_empty(self):
+        filtered = filter_by_score([])
+        assert filtered == []
+
+
+# ---------------------------------------------------------------------------
+# rank_and_filter
+# ---------------------------------------------------------------------------
+
+
+class TestRankAndFilter:
+    def test_basic(self):
+        scored = [
+            _make_scored(0.9, "A"),
+            _make_scored(0.5, "B"),
+            _make_scored(0.3, "C"),
+            _make_scored(0.7, "D"),
+        ]
+        result = rank_and_filter(scored, min_score=0.4, top_n=3)
+        assert isinstance(result, RankingResult)
+        assert result.total_candidates == 4
+        assert result.ranked_candidates == 3
+        assert result.top_score == pytest.approx(0.9)
+        assert result.candidates[0].rank == 1
+        assert result.candidates[0].sequence == "A"
+
+    def test_no_filter(self):
+        scored = [
+            _make_scored(0.9, "A"),
+            _make_scored(0.5, "B"),
+        ]
+        result = rank_and_filter(scored)
+        assert result.total_candidates == 2
+        assert result.ranked_candidates == 2
+
+    def test_empty(self):
+        result = rank_and_filter([])
+        assert result.total_candidates == 0
+        assert result.ranked_candidates == 0
+        assert result.top_score == pytest.approx(0.0)
+        assert result.median_score == pytest.approx(0.0)
+
+    def test_median_odd(self):
+        scored = [
+            _make_scored(0.9, "A"),
+            _make_scored(0.5, "B"),
+            _make_scored(0.3, "C"),
+        ]
+        result = rank_and_filter(scored)
+        assert result.median_score == pytest.approx(0.5)
+
+    def test_median_even(self):
+        scored = [
+            _make_scored(0.9, "A"),
+            _make_scored(0.7, "B"),
+            _make_scored(0.5, "C"),
+            _make_scored(0.3, "D"),
+        ]
+        result = rank_and_filter(scored)
+        # Sorted: 0.3, 0.5, 0.7, 0.9 → median = (0.5 + 0.7) / 2 = 0.6
+        assert result.median_score == pytest.approx(0.6)
+
+
+# ---------------------------------------------------------------------------
+# score_rank_and_filter
+# ---------------------------------------------------------------------------
+
+
+class TestScoreRankAndFilter:
+    def test_basic(self):
+        cands = [
+            ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20, gc_content=0.5, region="CDS"),
+            ASOCandidate("GCGCGCGCGCGCGCGCGCGC", 20, 40, 20, gc_content=1.0, region="3UTR"),
+            ASOCandidate("AATTAATTAATTAATTAATT", 40, 60, 20, gc_content=0.1, region="5UTR"),
+        ]
+        features = [
+            {
+                "accessibility_score": 0.8,
+                "tm_score": 0.9,
+                "binding_class": "strong",
+                "off_target_score": 0.95,
+            },
+            {
+                "accessibility_score": 0.3,
+                "tm_score": 0.5,
+                "binding_class": "moderate",
+                "off_target_score": 0.7,
+            },
+            {
+                "accessibility_score": 0.6,
+                "tm_score": 0.7,
+                "binding_class": "moderate",
+                "off_target_score": 0.9,
+            },
+        ]
+        result = score_rank_and_filter(cands, features, min_score=0.0, top_n=2)
+        assert result.total_candidates == 3
+        assert result.ranked_candidates == 2
+        assert result.candidates[0].rank == 1
+        assert result.candidates[1].rank == 2
+
+    def test_all_filtered(self):
+        cands = [
+            ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20, gc_content=0.5),
+        ]
+        result = score_rank_and_filter(cands, min_score=1.5)
+        assert result.total_candidates == 1
+        assert result.ranked_candidates == 0
+
+    def test_no_top_n(self):
+        cands = [
+            ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20, gc_content=0.5, region="CDS"),
+            ASOCandidate("GCGCGCGCGCGCGCGCGCGC", 20, 40, 20, gc_content=1.0, region="CDS"),
+        ]
+        features = [
+            {"accessibility_score": 0.8, "tm_score": 0.9, "binding_class": "strong"},
+            {"accessibility_score": 0.3, "tm_score": 0.5, "binding_class": "moderate"},
+        ]
+        result = score_rank_and_filter(cands, features)
+        assert result.ranked_candidates == 2
+        assert result.candidates[0].rank == 1
