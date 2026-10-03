@@ -863,3 +863,71 @@ def create_engine_from_config(
         chemistry_bonus,
     )
     return engine
+
+
+# ---------------------------------------------------------------------------
+# Integration helpers: build ScoreContext from upstream results
+# ---------------------------------------------------------------------------
+
+
+def build_features_dict(
+    thermo_summary=None,
+    off_target_result=None,
+    variant_annotation=None,
+    accessibility_score: float = -1.0,
+    transcript_length: int = 0,
+) -> dict:
+    """Build a features dict from upstream module results.
+
+    Combines results from thermodynamics, off-target, variant, and
+    accessibility modules into a single dict for score_candidate.
+
+    Parameters
+    ----------
+    thermo_summary : ThermodynamicSummary or None
+        Result from compute_thermodynamic_summary().
+    off_target_result : OffTargetResult or None
+        Result from score_off_target() (the tuple's first element).
+    variant_annotation : VariantAnnotation or None
+        Result from VariantAnnotator.annotate().
+    accessibility_score : float
+        Pre-computed accessibility score (default -1.0 = not computed).
+    transcript_length : int
+        Total transcript length for positional scoring.
+
+    Returns
+    -------
+    dict
+        Features dict ready for score_candidate().
+    """
+    features: dict = {}
+
+    if thermo_summary is not None:
+        features["tm"] = thermo_summary.tm
+        features["tm_score"] = thermo_summary.tm_score
+        features["dg_duplex"] = thermo_summary.dg_duplex
+        features["dg_self"] = thermo_summary.dg_self
+        features["dg_target"] = thermo_summary.dg_target
+        features["dg_net"] = thermo_summary.dg_net
+        features["binding_class"] = thermo_summary.binding_class
+        features["self_structure_penalty"] = thermo_summary.self_structure_penalty
+
+    if off_target_result is not None:
+        if isinstance(off_target_result, tuple):
+            _, ot_score, _ = off_target_result
+            features["off_target_score"] = ot_score
+        else:
+            from aso_designer.off_target import calculate_off_target_score
+
+            features["off_target_score"] = calculate_off_target_score(off_target_result)
+
+    if variant_annotation is not None:
+        from aso_designer.variant import classify_variant_risk
+
+        features["variant_penalty"] = variant_annotation.penalty
+        features["variant_risk"] = classify_variant_risk(variant_annotation)
+
+    features["accessibility_score"] = accessibility_score
+    features["transcript_length"] = transcript_length
+
+    return features
