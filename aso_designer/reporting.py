@@ -1106,3 +1106,99 @@ class ReportAssembler:
             include_offtarget_details=include_offtarget,
             include_variant_details=include_variant,
         )
+
+
+# ---------------------------------------------------------------------------
+# Top-level assemble_report convenience
+# ---------------------------------------------------------------------------
+
+
+def assemble_report(
+    scored_candidates: list,
+    output_dir: str | Path,
+    target_name: str = "",
+    target_id: str = "",
+    chemistry: str = "gapmer",
+    total_candidates: int = 0,
+    passed_filters: int = 0,
+    thermodynamic_summaries: list | None = None,
+    off_target_results: list | None = None,
+    variant_annotations: list | None = None,
+    metadata: dict[str, Any] | None = None,
+    basename: str = "aso_report",
+    generate_json: bool = True,
+    generate_html: bool = True,
+    include_thermo: bool = True,
+    include_offtarget: bool = True,
+    include_variant: bool = True,
+) -> dict[str, Path]:
+    """Assemble and write reports from all pipeline outputs in one call.
+
+    This is the top-level convenience function that chains
+    build_report_data → generate_report.
+
+    Parameters
+    ----------
+    scored_candidates : list[CandidateScore]
+        Scored and ranked candidates.
+    output_dir : str or Path
+        Output directory for report files.
+    target_name : str
+        Target gene name.
+    target_id : str
+        Target transcript accession.
+    chemistry : str
+        Chemistry used.
+    total_candidates : int
+        Total candidates before filtering.
+    passed_filters : int
+        Candidates that passed pre-filters.
+    thermodynamic_summaries : list or None
+        Per-candidate thermodynamic summaries.
+    off_target_results : list or None
+        Per-candidate off-target results.
+    variant_annotations : list or None
+        Per-candidate variant annotations.
+    metadata : dict or None
+        Additional run metadata.
+    basename : str
+        Base filename for reports.
+    generate_json : bool
+        Write JSON report.
+    generate_html : bool
+        Write HTML report.
+    include_thermo : bool
+        Include thermodynamic details.
+    include_offtarget : bool
+        Include off-target details.
+    include_variant : bool
+        Include variant details.
+
+    Returns
+    -------
+    dict[str, Path]
+        Maps format to output file path.
+    """
+    report = build_report_data(
+        scored_candidates=scored_candidates,
+        total_candidates=total_candidates,
+        passed_filters=passed_filters,
+        target_name=target_name,
+        target_id=target_id,
+        chemistry=chemistry,
+        thermodynamic_summaries=thermodynamic_summaries,
+        off_target_results=off_target_results,
+        variant_annotations=variant_annotations,
+        metadata=metadata,
+        include_thermo_details=include_thermo,
+        include_offtarget_details=include_offtarget,
+        include_variant_details=include_variant,
+    )
+
+    return generate_report(
+        report,
+        output_dir,
+        basename=basename,
+        generate_json=generate_json,
+        generate_html=generate_html,
+    )
