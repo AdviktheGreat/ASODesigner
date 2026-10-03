@@ -569,3 +569,76 @@ class GCContentScoreComponent:
             if self.gc_max == 1.0:
                 return 0.0
             return (1.0 - gc) / (1.0 - self.gc_max)
+
+
+# ---------------------------------------------------------------------------
+# Convenience functions
+# ---------------------------------------------------------------------------
+
+
+def score_candidate(
+    candidate,
+    features: dict | None = None,
+    engine: ScoreEngine | None = None,
+) -> CandidateScore:
+    """Score a single ASO candidate using its computed features.
+
+    Builds a ScoreContext from the candidate and its features dict,
+    then runs the score engine to produce a CandidateScore.
+
+    Parameters
+    ----------
+    candidate : ASOCandidate
+        The candidate to score (provides sequence, start, end, chemistry,
+        gc_content, region).
+    features : dict or None
+        Computed features (accessibility_score, tm, tm_score, dg_duplex,
+        dg_self, dg_target, dg_net, binding_class, off_target_score,
+        variant_penalty, variant_risk, self_structure_penalty,
+        transcript_length). Missing features use neutral defaults.
+    engine : ScoreEngine or None
+        Score engine to use. If None, creates a default engine.
+
+    Returns
+    -------
+    CandidateScore
+        Scored candidate with full breakdown.
+    """
+    if engine is None:
+        engine = create_score_engine()
+    if features is None:
+        features = {}
+
+    ctx = ScoreContext(
+        sequence=candidate.sequence,
+        chemistry=candidate.chemistry,
+        start=candidate.start,
+        end=candidate.end,
+        length=candidate.length,
+        gc_content=candidate.gc_content,
+        region=candidate.region,
+        accessibility_score=features.get("accessibility_score", -1.0),
+        tm=features.get("tm", -999.0),
+        tm_score=features.get("tm_score", -1.0),
+        dg_duplex=features.get("dg_duplex", 0.0),
+        dg_self=features.get("dg_self", 0.0),
+        dg_target=features.get("dg_target", 0.0),
+        dg_net=features.get("dg_net", 0.0),
+        binding_class=features.get("binding_class", ""),
+        off_target_score=features.get("off_target_score", -1.0),
+        variant_penalty=features.get("variant_penalty", 0.0),
+        variant_risk=features.get("variant_risk", ""),
+        self_structure_penalty=features.get("self_structure_penalty", 0.0),
+        transcript_length=features.get("transcript_length", 0),
+    )
+
+    composite = engine.score(ctx)
+
+    return CandidateScore(
+        sequence=candidate.sequence,
+        start=candidate.start,
+        end=candidate.end,
+        chemistry=candidate.chemistry,
+        composite_score=composite,
+        final_score=composite.final_score,
+    )
