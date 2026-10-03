@@ -104,3 +104,88 @@ The pipeline generates two report formats:
   SVG score distribution chart, and detail tables
 
 Reports are written to a configurable output directory.
+
+## Thermodynamics
+
+### Nearest-neighbor (NN) model
+
+ASODesigner uses the unified nearest-neighbor (NN) model for melting
+temperature (Tm) and free energy (ΔG) predictions:
+
+- **DNA/DNA** — SantaLucia 1998 unified parameters (PNAS 95:1460-1465)
+- **RNA/RNA** — Turner 2004 parameters (Nucleic Acids Res 38:D280-D282)
+
+The NN model computes thermodynamic properties by summing contributions
+from each dinucleotide step in the duplex, plus initiation and symmetry
+corrections.
+
+### Melting temperature (Tm)
+
+Tm is calculated as:
+
+$$T_m = \frac{\Delta H \times 1000}{\Delta S + R \times \ln(C_T / x)} - 273.15$$
+
+Where:
+- $\Delta H$ = total enthalpy (kcal/mol), summed over NN steps
+- $\Delta S$ = total entropy (cal/mol·K), summed over NN steps
+- $R$ = gas constant (1.987 cal/mol·K)
+- $C_T$ = total strand concentration
+- $x$ = 4 for non-self-complementary, 1 for self-complementary
+
+#### Salt correction
+
+The SantaLucia salt correction adjusts ΔS rather than Tm directly:
+
+$$\Delta S_{corrected} = \Delta S + 0.368 \times (N-1) \times \ln([Na^+])$$
+
+Where $N$ is the number of nucleotides and $[Na^+]$ is the sodium
+concentration in molar.
+
+#### Chemistry-aware Tm
+
+Each chemistry has preset Tm adjustments (e.g., 2'-OMe increases Tm
+due to increased binding affinity). These are applied as additive
+corrections to the computed Tm.
+
+### Duplex ΔG
+
+Duplex formation free energy is computed at a reference temperature
+(37°C = 310.15 K):
+
+$$\Delta G = \Delta H - T_{ref} \times \Delta S / 1000$$
+
+Two methods are available:
+- **Nearest-neighbor** — Fast, uses the NN parameter tables
+- **RNAduplex** — ViennaRNA tool, more accurate for structured targets
+
+### Self-structure ΔG
+
+Self-structure (intramolecular folding) of the ASO is computed via:
+- **RNAfold** (ViennaRNA) — MFE structure prediction
+- **Nearest-neighbor** — Approximate using NN parameters
+
+A chemistry-aware self-structure penalty is applied based on the
+self-structure ΔG and the chemistry preset's self-structure weight.
+
+### Target structure ΔG
+
+The target RNA structure at the binding site is computed to estimate
+the energetic cost of unfolding the target for ASO binding.
+
+### Net binding energy
+
+The net binding energy combines all thermodynamic terms:
+
+$$\Delta G_{net} = \Delta G_{duplex} - \Delta G_{self} - \Delta G_{target}$$
+
+A more negative $\Delta G_{net}$ indicates stronger net binding.
+
+### Binding classification
+
+Candidates are classified by their thermodynamic profile:
+
+| Class | Criteria |
+|---|---|
+| Strong | $\Delta G_{net} < -10$ kcal/mol and Tm in optimal range |
+| Moderate | $-10 \leq \Delta G_{net} < -5$ kcal/mol |
+| Weak | $\Delta G_{net} \geq -5$ kcal/mol |
