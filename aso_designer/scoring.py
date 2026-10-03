@@ -999,3 +999,82 @@ def filter_by_score(
         filtered = sorted(filtered, key=lambda c: c.final_score, reverse=True)
         filtered = filtered[:top_n]
     return filtered
+
+
+# ---------------------------------------------------------------------------
+# Ranking result and convenience
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RankingResult:
+    """Summary of a ranking operation.
+
+    Attributes
+    ----------
+    total_candidates : int
+        Total candidates before filtering.
+    ranked_candidates : int
+        Candidates after filtering.
+    top_score : float
+        Highest final score among ranked candidates.
+    median_score : float
+        Median final score among ranked candidates.
+    candidates : list[CandidateScore]
+        Ranked and filtered candidates.
+    """
+
+    total_candidates: int
+    ranked_candidates: int
+    top_score: float
+    median_score: float
+    candidates: list[CandidateScore]
+
+
+def rank_and_filter(
+    scored: list[CandidateScore],
+    min_score: float = 0.0,
+    top_n: int | None = None,
+) -> RankingResult:
+    """Rank and filter candidates in one step.
+
+    Convenience function that chains filter_by_score → rank_candidates
+    and wraps the result in a RankingResult.
+
+    Parameters
+    ----------
+    scored : list[CandidateScore]
+        Scored candidates.
+    min_score : float
+        Minimum score to keep (default 0.0).
+    top_n : int or None
+        Keep only top N after filtering.
+
+    Returns
+    -------
+    RankingResult
+        Ranking summary with filtered and ranked candidates.
+    """
+    total = len(scored)
+    filtered = filter_by_score(scored, min_score=min_score, top_n=top_n)
+    ranked = rank_candidates(filtered)
+
+    if ranked:
+        top = ranked[0].final_score
+        scores = sorted(c.final_score for c in ranked)
+        mid = len(scores) // 2
+        if len(scores) % 2 == 0:
+            median = (scores[mid - 1] + scores[mid]) / 2
+        else:
+            median = scores[mid]
+    else:
+        top = 0.0
+        median = 0.0
+
+    return RankingResult(
+        total_candidates=total,
+        ranked_candidates=len(ranked),
+        top_score=top,
+        median_score=median,
+        candidates=ranked,
+    )
