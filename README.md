@@ -244,6 +244,81 @@ pytest tests/test_scoring.py -v
 The test suite includes 550+ tests covering all modules, with mocked
 ViennaRNA and NCBI calls for reproducibility.
 
+## Programmatic Usage
+
+ASODesigner can be used as a Python library:
+
+```python
+from aso_designer.pipeline import run_pipeline
+
+# Run the full pipeline
+result = run_pipeline(
+    target="BRCA1",
+    chemistry="gapmer",
+    local_fasta="transcript.fasta",
+    output_dir="results/",
+    top_n=10,
+    min_score=0.5,
+)
+
+print(f"Generated {result.total_candidates} candidates")
+print(f"Ranked {result.ranked_candidates} candidates")
+print(f"Top score: {result.top_score:.4f}")
+print(f"Reports: {result.report_paths}")
+```
+
+### Individual module usage
+
+```python
+from aso_designer.candidate_generator import generate_candidates
+from aso_designer.config_loader import load_config
+from aso_designer.filters import run_all_filters
+from aso_designer.scoring import score_rank_and_filter
+
+# Load config
+config = load_config(chemistry="gapmer")
+
+# Generate candidates
+candidates = generate_candidates("ATGCATGC...", config.candidate)
+
+# Apply pre-filters
+run_all_filters(candidates, gc_min=0.30, gc_max=0.60)
+
+# Score and rank
+features = [{} for _ in candidates if c.passes_filters]
+ranking = score_rank_and_filter(
+    [c for c in candidates if c.passes_filters],
+    features,
+    min_score=0.5,
+    top_n=10,
+)
+
+for c in ranking.candidates:
+    print(f"Rank {c.rank}: {c.sequence} score={c.final_score:.4f}")
+```
+
+### Custom scoring
+
+```python
+from aso_designer.scoring import create_score_engine, ScoreContext
+
+# Create engine with custom weights
+engine = create_score_engine(
+    weights={"accessibility": 0.4, "thermodynamics": 0.3, "gc_content": 0.3},
+)
+
+# Score a single candidate
+ctx = ScoreContext(
+    sequence="ATGCATGCATGCATGCATGC",
+    gc_content=0.5,
+    accessibility_score=0.8,
+    tm_score=0.9,
+    binding_class="strong",
+)
+result = engine.score(ctx)
+print(f"Final score: {result.final_score:.4f}")
+```
+
 ## Disclaimer
 
 ASODesigner is an **in-silico research and candidate-ranking tool**. It does
