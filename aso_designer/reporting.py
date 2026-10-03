@@ -1277,3 +1277,76 @@ def assemble_report_from_config(
         include_offtarget=reporting_cfg.include_offtarget_details,
         include_variant=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Batch report generation
+# ---------------------------------------------------------------------------
+
+
+def generate_reports_batch(
+    targets: list[dict[str, Any]],
+    output_dir: str | Path,
+    generate_json: bool = True,
+    generate_html: bool = True,
+) -> list[dict[str, Path]]:
+    """Generate reports for multiple targets in batch.
+
+    Each target dict should contain the same keys as assemble_report
+    keyword arguments. Reports are written to subdirectories named
+    after the target.
+
+    Parameters
+    ----------
+    targets : list[dict]
+        List of target dicts. Each dict must have 'scored_candidates'
+        and 'target_name'. Optional keys: 'target_id', 'chemistry',
+        'total_candidates', 'passed_filters', 'thermodynamic_summaries',
+        'off_target_results', 'variant_annotations', 'metadata'.
+    output_dir : str or Path
+        Base output directory. Each target gets a subdirectory.
+    generate_json : bool
+        Write JSON reports.
+    generate_html : bool
+        Write HTML reports.
+
+    Returns
+    -------
+    list[dict[str, Path]]
+        List of path dicts, one per target.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    all_paths: list[dict[str, Path]] = []
+
+    for target in targets:
+        name = target.get("target_name", "unknown")
+        scored = target.get("scored_candidates", [])
+        if not scored:
+            logger.warning("Skipping target '%s': no scored candidates", name)
+            continue
+
+        target_dir = output_dir / name
+        basename = f"{name}_report"
+
+        paths = assemble_report(
+            scored_candidates=scored,
+            output_dir=target_dir,
+            target_name=name,
+            target_id=target.get("target_id", ""),
+            chemistry=target.get("chemistry", "gapmer"),
+            total_candidates=target.get("total_candidates", 0),
+            passed_filters=target.get("passed_filters", 0),
+            thermodynamic_summaries=target.get("thermodynamic_summaries"),
+            off_target_results=target.get("off_target_results"),
+            variant_annotations=target.get("variant_annotations"),
+            metadata=target.get("metadata"),
+            basename=basename,
+            generate_json=generate_json,
+            generate_html=generate_html,
+        )
+        all_paths.append(paths)
+
+    logger.info("Batch reports generated: %d targets in %s", len(all_paths), output_dir)
+    return all_paths
