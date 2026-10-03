@@ -331,6 +331,105 @@ def _configure_logging(level: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# CLI utility functions
+# ---------------------------------------------------------------------------
+
+
+def format_score_table(scored_candidates: list, top_n: int = 10) -> str:
+    """Format scored candidates as a text table for CLI output.
+
+    Parameters
+    ----------
+    scored_candidates : list[CandidateScore]
+        Scored and ranked candidates.
+    top_n : int
+        Maximum rows to display (default 10).
+
+    Returns
+    -------
+    str
+        Formatted text table.
+    """
+    if not scored_candidates:
+        return "No candidates to display."
+
+    lines: list[str] = []
+    header = (
+        f"{'Rank':<6} {'Sequence':<22} {'Start':<8} {'End':<8} "
+        f"{'Chem':<10} {'Score':<8} {'Binding':<10}"
+    )
+    lines.append(header)
+    lines.append("-" * len(header))
+
+    for c in scored_candidates[:top_n]:
+        rank = str(c.rank or "-")
+        seq = c.sequence[:20] + ("..." if len(c.sequence) > 20 else "")
+        binding_str = ""
+
+        lines.append(
+            f"{rank:<6} {seq:<22} {c.start:<8} {c.end:<8} "
+            f"{c.chemistry:<10} {c.final_score:<8.4f} {binding_str:<10}"
+        )
+
+    return "\n".join(lines)
+
+
+def format_summary(stats: dict, indent: int = 0) -> str:
+    """Format a summary dict as aligned key-value pairs.
+
+    Parameters
+    ----------
+    stats : dict
+        Summary statistics (from ReportSummary.to_dict()).
+    indent : int
+        Indentation level (default 0).
+
+    Returns
+    -------
+    str
+        Formatted text.
+    """
+    prefix = " " * indent
+    lines: list[str] = []
+    max_key = max(len(k) for k in stats) if stats else 0
+    for key, value in stats.items():
+        if isinstance(value, float):
+            val_str = f"{value:.4f}"
+        else:
+            val_str = str(value)
+        lines.append(f"{prefix}{key:<{max_key + 2}} {val_str}")
+    return "\n".join(lines)
+
+
+def print_banner(title: str, width: int = 60) -> None:
+    """Print a section banner to stdout."""
+    print()
+    print("=" * width)
+    print(f"  {title}")
+    print("=" * width)
+
+
+def validate_output_dir(path: str) -> str:
+    """Validate and normalize an output directory path.
+
+    Parameters
+    ----------
+    path : str
+        Output directory path.
+
+    Returns
+    -------
+    str
+        Normalized path.
+    """
+    from pathlib import Path
+
+    p = Path(path)
+    p.mkdir(parents=True, exist_ok=True)
+    return str(p.resolve())
+
+
+# ---------------------------------------------------------------------------
 # Subcommand handlers (stubs — implemented in Step 43)
 # ---------------------------------------------------------------------------
 
