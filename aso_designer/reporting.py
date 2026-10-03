@@ -899,3 +899,83 @@ def generate_report(
 
     logger.info("Reports generated in %s: %s", output_dir, list(paths.keys()))
     return paths
+
+
+def generate_report_from_ranking(
+    ranking: Any,
+    output_dir: str | Path,
+    target_name: str = "",
+    target_id: str = "",
+    chemistry: str = "gapmer",
+    total_candidates: int = 0,
+    passed_filters: int = 0,
+    basename: str = "aso_report",
+    generate_json: bool = True,
+    generate_html: bool = True,
+    thermodynamic_summaries: list | None = None,
+    off_target_results: list | None = None,
+    variant_annotations: list | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Path]:
+    """Generate reports directly from a RankingResult.
+
+    Convenience function that builds ReportData from a RankingResult
+    (from score_rank_and_filter or rank_and_filter) and writes
+    JSON + HTML reports.
+
+    Parameters
+    ----------
+    ranking : RankingResult
+        Ranking result with scored candidates.
+    output_dir : str or Path
+        Output directory.
+    target_name : str
+        Target gene name.
+    target_id : str
+        Target transcript accession.
+    chemistry : str
+        Chemistry used.
+    total_candidates : int
+        Total candidates before filtering.
+    passed_filters : int
+        Candidates that passed pre-filters.
+    basename : str
+        Base filename.
+    generate_json : bool
+        Write JSON report.
+    generate_html : bool
+        Write HTML report.
+    thermodynamic_summaries : list or None
+        Per-candidate thermodynamic summaries.
+    off_target_results : list or None
+        Per-candidate off-target results.
+    variant_annotations : list or None
+        Per-candidate variant annotations.
+    metadata : dict or None
+        Additional run metadata.
+
+    Returns
+    -------
+    dict[str, Path]
+        Maps format to output file path.
+    """
+    report = build_report_data(
+        scored_candidates=ranking.candidates,
+        total_candidates=total_candidates or ranking.total_candidates,
+        passed_filters=passed_filters,
+        target_name=target_name,
+        target_id=target_id,
+        chemistry=chemistry,
+        thermodynamic_summaries=thermodynamic_summaries,
+        off_target_results=off_target_results,
+        variant_annotations=variant_annotations,
+        metadata=metadata,
+    )
+
+    return generate_report(
+        report,
+        output_dir,
+        basename=basename,
+        generate_json=generate_json,
+        generate_html=generate_html,
+    )
