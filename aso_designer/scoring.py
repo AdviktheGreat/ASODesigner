@@ -803,3 +803,63 @@ class PositionalScoreComponent:
                 base = min(1.0, base + bonus)
 
         return base
+
+
+# ---------------------------------------------------------------------------
+# Config-driven engine creation
+# ---------------------------------------------------------------------------
+
+
+def create_engine_from_config(
+    config_path: str | None = None,
+    chemistry: str | None = None,
+) -> ScoreEngine:
+    """Create a ScoreEngine from YAML configuration.
+
+    Loads weights and chemistry bonus from the config system,
+    then registers all available score components.
+
+    Parameters
+    ----------
+    config_path : str or None
+        Path to a user config YAML. If None, uses default config.
+    chemistry : str or None
+        Chemistry name to apply preset adjustments.
+
+    Returns
+    -------
+    ScoreEngine
+        Configured engine with all available components registered.
+    """
+    from aso_designer.config_loader import load_config
+
+    config = load_config(config_path, chemistry=chemistry)
+
+    weights = {
+        "accessibility": config.scoring.weights.accessibility,
+        "thermodynamics": config.scoring.weights.thermodynamics,
+        "gc_content": config.scoring.weights.gc_content,
+        "off_target": config.scoring.weights.off_target,
+        "variant": config.scoring.weights.variant,
+        "self_structure": config.scoring.weights.self_structure,
+        "positional": config.scoring.weights.positional,
+    }
+
+    chemistry_bonus = 0.0
+    # Check for chemistry bonus stored by config_loader
+    raw_config = config.model_dump()
+    if "scoring" in raw_config and "chemistry_bonus" in raw_config.get("scoring", {}):
+        chemistry_bonus = raw_config["scoring"]["chemistry_bonus"]
+
+    engine = create_score_engine(
+        weights=weights,
+        chemistry_bonus=chemistry_bonus,
+        register_all=True,
+    )
+
+    logger.info(
+        "Created engine from config: %d components, chemistry_bonus=%.4f",
+        len(engine._components),
+        chemistry_bonus,
+    )
+    return engine
