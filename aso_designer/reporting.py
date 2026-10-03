@@ -307,3 +307,145 @@ def compute_summary_statistics(
         chemistry=chemistry,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Build report data from pipeline outputs
+# ---------------------------------------------------------------------------
+
+
+def build_report_data(
+    scored_candidates: list,
+    total_candidates: int = 0,
+    passed_filters: int = 0,
+    target_name: str = "",
+    target_id: str = "",
+    chemistry: str = "gapmer",
+    thermodynamic_summaries: list | None = None,
+    off_target_results: list | None = None,
+    variant_annotations: list | None = None,
+    metadata: dict[str, Any] | None = None,
+    include_thermo_details: bool = True,
+    include_offtarget_details: bool = True,
+    include_variant_details: bool = True,
+) -> ReportData:
+    """Assemble ReportData from pipeline outputs.
+
+    Combines scored candidates, thermodynamic summaries, off-target
+    results, and variant annotations into a complete ReportData
+    structure ready for JSON or HTML export.
+
+    Parameters
+    ----------
+    scored_candidates : list[CandidateScore]
+        Scored and ranked candidates.
+    total_candidates : int
+        Total candidates generated before filtering.
+    passed_filters : int
+        Candidates that passed pre-filters.
+    target_name : str
+        Target gene name.
+    target_id : str
+        Target transcript accession.
+    chemistry : str
+        Chemistry used for this run.
+    thermodynamic_summaries : list[ThermodynamicSummary] or None
+        Per-candidate thermodynamic summaries.
+    off_target_results : list or None
+        Per-candidate off-target results.
+    variant_annotations : list or None
+        Per-candidate variant annotations.
+    metadata : dict or None
+        Additional run metadata.
+    include_thermo_details : bool
+        Include thermodynamic detail section.
+    include_offtarget_details : bool
+        Include off-target detail section.
+    include_variant_details : bool
+        Include variant detail section.
+
+    Returns
+    -------
+    ReportData
+        Complete report data.
+    """
+    summary = compute_summary_statistics(
+        scored_candidates,
+        total_candidates=total_candidates,
+        passed_filters=passed_filters,
+        target_name=target_name,
+        target_id=target_id,
+        chemistry=chemistry,
+    )
+
+    candidates = [c.to_dict() for c in scored_candidates]
+
+    thermo_details: list[dict[str, Any]] = []
+    if include_thermo_details and thermodynamic_summaries:
+        for ts in thermodynamic_summaries:
+            if hasattr(ts, "to_dict"):
+                thermo_details.append(ts.to_dict())
+            else:
+                thermo_details.append(_thermo_summary_to_dict(ts))
+
+    off_target_details: list[dict[str, Any]] = []
+    if include_offtarget_details and off_target_results:
+        for ot in off_target_results:
+            off_target_details.append(_off_target_to_dict(ot))
+
+    variant_details: list[dict[str, Any]] = []
+    if include_variant_details and variant_annotations:
+        for va in variant_annotations:
+            variant_details.append(_variant_annotation_to_dict(va))
+
+    return ReportData(
+        summary=summary,
+        candidates=candidates,
+        thermodynamic_details=thermo_details,
+        off_target_details=off_target_details,
+        variant_details=variant_details,
+        metadata=metadata or {},
+    )
+
+
+def _thermo_summary_to_dict(ts: Any) -> dict[str, Any]:
+    """Convert a ThermodynamicSummary to a dict."""
+    return {
+        "tm": round(ts.tm, 2),
+        "tm_score": round(ts.tm_score, 4),
+        "dg_duplex": round(ts.dg_duplex, 2),
+        "dg_self": round(ts.dg_self, 2),
+        "self_structure_penalty": round(ts.self_structure_penalty, 4),
+        "dg_target": round(ts.dg_target, 2),
+        "dg_net": round(ts.dg_net, 2),
+        "binding_class": ts.binding_class,
+    }
+
+
+def _off_target_to_dict(ot: Any) -> dict[str, Any]:
+    """Convert an off-target result to a dict."""
+    if isinstance(ot, tuple):
+        result, score, specificity = ot
+        return {
+            "off_target_score": round(score, 4),
+            "specificity_class": specificity,
+            "total_hits": getattr(result, "total_hits", 0),
+            "off_target_hits": getattr(result, "off_target_hits", 0),
+            "perfect_hits": getattr(result, "perfect_hits", 0),
+        }
+    return {
+        "off_target_score": 0.0,
+        "total_hits": getattr(ot, "total_hits", 0),
+        "off_target_hits": getattr(ot, "off_target_hits", 0),
+    }
+
+
+def _variant_annotation_to_dict(va: Any) -> dict[str, Any]:
+    """Convert a variant annotation to a dict."""
+    return {
+        "penalty": round(getattr(va, "penalty", 0.0), 4),
+        "overlapping_variants": getattr(va, "overlapping_variants", 0),
+        "seed_variants": getattr(va, "seed_variants", 0),
+        "non_seed_variants": getattr(va, "non_seed_variants", 0),
+        "has_pathogenic": getattr(va, "has_pathogenic", False),
+    }
