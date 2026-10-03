@@ -650,16 +650,127 @@ def _handle_design(args: argparse.Namespace) -> int:
 
 
 def _handle_score(args: argparse.Namespace) -> int:
-    """Handle the 'score' subcommand."""
-    logger.info("Score command not yet implemented")
-    print("Score command is not yet implemented. See Step 43.")
+    """Handle the 'score' subcommand — score pre-generated candidates."""
+    import json as json_module
+
+    from aso_designer.candidate import ASOCandidate
+    from aso_designer.reporting import build_report_data, generate_report
+    from aso_designer.scoring import rank_and_filter, score_candidates_batch
+
+    # Validate input file
+    try:
+        candidates_path = validate_input_file(args.candidates, "Candidates file")
+    except FileNotFoundError as e:
+        print_error(str(e))
+        return 1
+
+    print_banner("ASODesigner — Score Candidates")
+
+    # Load candidates
+    print_progress("LOAD", f"Reading candidates from {candidates_path}")
+    with open(candidates_path) as f:
+        data = json_module.loads(f.read())
+
+    candidates_data = data.get("candidates", data if isinstance(data, list) else [])
+    candidates = [ASOCandidate.from_dict(c) for c in candidates_data]
+    print_progress("LOAD", f"Loaded {len(candidates)} candidates")
+
+    if not candidates:
+        print_error("No candidates found in file.")
+        return 1
+
+    # Score
+    print_progress("SCORE", f"Scoring with chemistry: {args.chemistry}")
+    features_list = [{} for _ in candidates]
+    scored = score_candidates_batch(candidates, features_list)
+
+    # Rank and filter
+    ranking = rank_and_filter(
+        scored,
+        min_score=args.min_score,
+        top_n=args.top_n,
+    )
+    print_progress(
+        "RANK",
+        f"Ranked {ranking.ranked_candidates} candidates (top score: {ranking.top_score:.4f})",
+    )
+
+    # Display results
+    print_results_table(ranking.candidates, top_n=20)
+
+    # Output
+    if args.output:
+        report = build_report_data(
+            scored_candidates=ranking.candidates,
+            total_candidates=len(candidates),
+            chemistry=args.chemistry,
+        )
+        from pathlib import Path
+
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        paths = generate_report(
+            report,
+            out_path.parent,
+            basename=out_path.stem,
+            generate_html=False,
+        )
+        print_success(f"Scored candidates saved to {paths['json']}")
+    else:
+        # Print to stdout as JSON
+        print()
+        print_banner("Scored Candidates (JSON)")
+        output_data = {
+            "total_candidates": len(candidates),
+            "ranked_candidates": ranking.ranked_candidates,
+            "top_score": round(ranking.top_score, 4),
+            "candidates": [c.to_dict() for c in ranking.candidates],
+        }
+        print(json_module.dumps(output_data, indent=2))
+
+    print_success("Scoring complete.")
     return 0
 
 
 def _handle_report(args: argparse.Namespace) -> int:
-    """Handle the 'report' subcommand."""
-    logger.info("Report command not yet implemented")
-    print("Report command is not yet implemented. See Step 43.")
+    """Handle the 'report' subcommand — generate reports from saved results."""
+    from aso_designer.reporting import generate_report, load_json_report
+
+    # Validate input file
+    try:
+        results_path = validate_input_file(args.results, "Results file")
+    except FileNotFoundError as e:
+        print_error(str(e))
+        return 1
+
+    print_banner("ASODesigner — Generate Reports")
+
+    # Load results
+    print_progress("LOAD", f"Reading results from {results_path}")
+    report_data = load_json_report(results_path)
+    print_progress("LOAD", f"Loaded {len(report_data.candidates)} candidates")
+
+    if not report_data.candidates:
+        print_error("No candidates found in results file.")
+        return 1
+
+    # Generate reports
+    output_dir = validate_output_dir(args.output_dir)
+    print_progress("REPORT", f"Generating reports in {output_dir}")
+
+    paths = generate_report(
+        report_data,
+        output_dir,
+        basename=args.basename,
+        generate_html=not args.no_html,
+    )
+
+    print()
+    print("  Reports generated:")
+    for fmt, path in paths.items():
+        print(f"    {fmt.upper():>6}: {path}")
+
+    print_success("Report generation complete.")
     return 0
 
 
