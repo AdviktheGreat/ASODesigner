@@ -680,3 +680,126 @@ def score_candidates_batch(
         score_candidate(cand, features, engine)
         for cand, features in zip(candidates, features_list, strict=True)
     ]
+
+
+# ---------------------------------------------------------------------------
+# Additional score components
+# ---------------------------------------------------------------------------
+
+
+class OffTargetScoreComponent:
+    """Scores candidates by off-target specificity.
+
+    Uses the pre-computed off-target specificity score from the
+    off-target module. A score of 1.0 means highly specific (no
+    off-targets), 0.0 means non-specific.
+
+    If off-target analysis was not computed, returns a neutral 0.5.
+    """
+
+    @property
+    def name(self) -> str:
+        return "off_target"
+
+    def score(self, context: ScoreContext) -> float:
+        if context.off_target_score < 0:
+            logger.debug("Off-target not computed; using neutral 0.5")
+            return 0.5
+        return context.off_target_score
+
+
+class VariantScoreComponent:
+    """Scores candidates by variant/SNP overlap penalty.
+
+    Converts the variant penalty (0.0 = no variants, higher = worse)
+    to a score (1.0 = no variants, 0.0 = heavy penalty).
+
+    If no variant data is available, returns 1.0 (no penalty).
+    """
+
+    @property
+    def name(self) -> str:
+        return "variant"
+
+    def score(self, context: ScoreContext) -> float:
+        if not context.variant_risk:
+            # No variant data computed; assume no penalty
+            return 1.0
+        return max(0.0, 1.0 - context.variant_penalty)
+
+
+class SelfStructureScoreComponent:
+    """Scores candidates by self-structure penalty.
+
+    Converts the self-structure penalty (0.0 = no self-structure,
+    higher = worse) to a score (1.0 = no self-structure, 0.0 = heavy).
+
+    If no self-structure data is available, returns 1.0.
+    """
+
+    @property
+    def name(self) -> str:
+        return "self_structure"
+
+    def score(self, context: ScoreContext) -> float:
+        if context.self_structure_penalty == 0.0 and context.dg_self == 0.0:
+            # No self-structure data computed; assume no penalty
+            return 1.0
+        return max(0.0, 1.0 - context.self_structure_penalty)
+
+
+class PositionalScoreComponent:
+    """Scores candidates by transcript region and position.
+
+    Region preferences (ASO design best practices):
+    - CDS: 1.0 (most effective for RNase H recruitment)
+    - 5UTR: 0.7 (good for translational blocking)
+    - 3UTR: 0.5 (moderate effectiveness)
+    - noncoding: 0.6 (useful for non-coding RNA targets)
+    - unknown: 0.3
+
+    Also applies a mild position preference: candidates near the
+    center of the transcript get a small bonus (±10%).
+
+    Parameters
+    ----------
+    region_weights : dict[str, float]
+        Maps region names to base scores.
+    position_bonus : float
+        Maximum position-based bonus (default 0.1).
+    """
+
+    def __init__(
+        self,
+        region_weights: dict[str, float] | None = None,
+        position_bonus: float = 0.1,
+    ):
+        self.region_weights = region_weights or {
+            "CDS": 1.0,
+            "5UTR": 0.7,
+            "3UTR": 0.5,
+            "noncoding": 0.6,
+            "unknown": 0.3,
+        }
+        self.position_bonus = position_bonus
+
+    @property
+    def name(self) -> str:
+        return "positional"
+
+    def score(self, context: ScoreContext) -> float:
+        base = self.region_weights.get(context.region, 0.3)
+
+        # Position bonus: candidates near center get a small boost
+        if context.transcript_length > 0 and context.length > 0:
+            center = context.transcript_length / 2
+            candidate_center = (context.start + context.end) / 2
+            # Distance from center, normalized to [0, 1]
+            max_dist = context.transcript_length / 2
+            if max_dist > 0:
+                dist = abs(candidate_center - center) / max_dist
+                # Bonus is highest at center (dist=0), zero at ends (dist=1)
+                bonus = self.position_bonus * (1.0 - dist)
+                base = min(1.0, base + bonus)
+
+        return base
