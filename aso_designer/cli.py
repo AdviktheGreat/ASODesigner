@@ -775,9 +775,65 @@ def _handle_report(args: argparse.Namespace) -> int:
 
 
 def _handle_info(args: argparse.Namespace) -> int:
-    """Handle the 'info' subcommand."""
-    logger.info("Info command not yet implemented")
-    print("Info command is not yet implemented. See Step 43.")
+    """Handle the 'info' subcommand — display config, presets, and version."""
+    from aso_designer import __author__, __email__, __version__
+    from aso_designer.config_loader import load_config
+
+    print_banner("ASODesigner — Info")
+
+    # Version info
+    print(f"  Version:    {__version__}")
+    print(f"  Author:     {__author__}")
+    print(f"  Email:      {__email__}")
+    print()
+
+    # Load config
+    config = load_config(args.config, chemistry=args.chemistry)
+
+    # Show candidate config
+    print("  Candidate Configuration:")
+    cand = config.candidate
+    print(f"    Length:         {cand.length} nt")
+    print(f"    Step:           {cand.step}")
+    print(f"    GC min:         {cand.gc_min}")
+    print(f"    GC max:         {cand.gc_max}")
+    print(f"    Homopolymer max: {cand.homopolymer_max}")
+    print(f"    Chemistry:      {cand.chemistry}")
+    print()
+
+    # Show scoring weights
+    if args.show_weights:
+        print("  Scoring Weights:")
+        weights = config.scoring.weights
+        for name, weight in weights.model_dump().items():
+            print(f"    {name:<20} {weight:.2f}")
+        print()
+
+    # Show chemistry presets
+    if args.show_presets:
+        print("  Chemistry Presets:")
+        from aso_designer.config_loader import _CHEMISTRY_PRESETS_PATH, load_yaml
+
+        if _CHEMISTRY_PRESETS_PATH.exists():
+            presets = load_yaml(_CHEMISTRY_PRESETS_PATH)
+            for chem_name, preset in presets.items():
+                print(f"    {chem_name}:")
+                for key, value in preset.items():
+                    print(f"      {key:<24} {value}")
+                print()
+        else:
+            print("    (presets file not found)")
+        print()
+
+    # Show reporting config
+    print("  Reporting Configuration:")
+    rpt = config.reporting
+    print(f"    Output dir:           {rpt.output_dir}")
+    print(f"    Generate HTML:        {rpt.generate_html}")
+    print(f"    Off-target details:   {rpt.include_offtarget_details}")
+    print()
+
+    print_success("Info displayed.")
     return 0
 
 
