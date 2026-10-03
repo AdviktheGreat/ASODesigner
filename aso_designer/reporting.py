@@ -449,3 +449,309 @@ def _variant_annotation_to_dict(va: Any) -> dict[str, Any]:
         "non_seed_variants": getattr(va, "non_seed_variants", 0),
         "has_pathogenic": getattr(va, "has_pathogenic", False),
     }
+
+
+# ---------------------------------------------------------------------------
+# HTML report generation
+# ---------------------------------------------------------------------------
+
+_HTML_CSS = """\
+/* ASODesigner report styles */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f5f5f5; color: #333; line-height: 1.6;
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+h1 { color: #1a1a2e; margin-bottom: 8px; }
+h2 { color: #16213e; margin: 20px 0 10px; border-bottom: 2px solid #0f3460; padding-bottom: 4px; }
+h3 { color: #0f3460; margin: 15px 0 8px; }
+.subtitle { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.summary-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px; margin-bottom: 20px;
+}
+.summary-card {
+  background: #fff; border-radius: 8px; padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.summary-card .label { font-size: 0.8em; color: #666; text-transform: uppercase; }
+.summary-card .value { font-size: 1.4em; font-weight: bold; color: #1a1a2e; }
+table {
+  width: 100%; border-collapse: collapse; background: #fff;
+  border-radius: 8px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;
+}
+th { background: #0f3460; color: #fff; padding: 10px 12px; text-align: left; font-size: 0.85em; }
+td { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 0.9em; }
+tr:hover { background: #f9f9f9; }
+.score-bar {
+  display: inline-block; height: 8px; border-radius: 4px;
+  background: #e0e0e0; position: relative; width: 80px; vertical-align: middle;
+}
+.score-bar .fill { height: 100%; border-radius: 4px; }
+.score-high { background: #4caf50; }
+.score-mid { background: #ff9800; }
+.score-low { background: #f44336; }
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 0.75em; font-weight: bold;
+}
+.badge-strong { background: #c8e6c9; color: #2e7d32; }
+.badge-moderate { background: #fff9c4; color: #f57f17; }
+.badge-weak { background: #ffcdd2; color: #c62828; }
+.detail-section { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.footer { text-align: center; color: #999; font-size: 0.8em; margin-top: 30px; }
+"""
+
+
+def _score_color(score: float) -> str:
+    """Return CSS class for a score value."""
+    if score >= 0.7:
+        return "score-high"
+    elif score >= 0.4:
+        return "score-mid"
+    return "score-low"
+
+
+def _score_bar_html(score: float) -> str:
+    """Return HTML for a score bar."""
+    pct = int(score * 100)
+    color = _score_color(score)
+    return (
+        f'<span class="score-bar">'
+        f'<span class="fill {color}" style="width:{pct}%"></span>'
+        f"</span> {score:.3f}"
+    )
+
+
+def _binding_badge(binding_class: str) -> str:
+    """Return HTML badge for binding classification."""
+    cls = {
+        "strong": "badge-strong",
+        "moderate": "badge-moderate",
+        "weak": "badge-weak",
+    }.get(binding_class, "")
+    return f'<span class="badge {cls}">{binding_class or "N/A"}</span>'
+
+
+def generate_html_report(
+    report: ReportData,
+    output_path: str | Path,
+    title: str = "ASODesigner Report",
+) -> Path:
+    """Generate a self-contained HTML report from ReportData.
+
+    Produces an HTML file with embedded CSS (no external dependencies),
+    summary statistics cards, a candidate table with score bars, and
+    optional detail sections.
+
+    Parameters
+    ----------
+    report : ReportData
+        Complete report data.
+    output_path : str or Path
+        Output HTML file path.
+    title : str
+        HTML page title.
+
+    Returns
+    -------
+    Path
+        Path to the written file.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    s = report.summary
+
+    html_parts: list[str] = [
+        "<!DOCTYPE html>",
+        '<html lang="en">',
+        "<head>",
+        '<meta charset="UTF-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+        f"<title>{title}</title>",
+        f"<style>{_HTML_CSS}</style>",
+        "</head>",
+        "<body>",
+        '<div class="container">',
+        f"<h1>{title}</h1>",
+        f'<p class="subtitle">Target: {s.target_name} ({s.target_id}) &mdash; '
+        f"Chemistry: {s.chemistry} &mdash; Generated: {s.timestamp}</p>",
+    ]
+
+    # Summary section
+    html_parts.append("<h2>Summary</h2>")
+    html_parts.append('<div class="summary-grid">')
+    summary_items = [
+        ("Total Candidates", str(s.total_candidates)),
+        ("Passed Filters", str(s.passed_filters)),
+        ("Scored", str(s.scored_candidates)),
+        ("Ranked", str(s.ranked_candidates)),
+        ("Top Score", f"{s.top_score:.4f}"),
+        ("Median Score", f"{s.median_score:.4f}"),
+        ("Mean Score", f"{s.mean_score:.4f}"),
+        ("Min Score", f"{s.min_score:.4f}"),
+    ]
+    for label, value in summary_items:
+        html_parts.append(
+            f'<div class="summary-card">'
+            f'<div class="label">{label}</div>'
+            f'<div class="value">{value}</div>'
+            f"</div>"
+        )
+    html_parts.append("</div>")
+
+    # Candidate table
+    html_parts.append("<h2>Ranked Candidates</h2>")
+    if report.candidates:
+        html_parts.append(_generate_candidate_table(report.candidates))
+    else:
+        html_parts.append("<p>No candidates to display.</p>")
+
+    # Detail sections
+    if report.thermodynamic_details:
+        html_parts.append("<h2>Thermodynamic Details</h2>")
+        html_parts.append(_generate_thermo_table(report.thermodynamic_details))
+
+    if report.off_target_details:
+        html_parts.append("<h2>Off-Target Details</h2>")
+        html_parts.append(_generate_offtarget_table(report.off_target_details))
+
+    if report.variant_details:
+        html_parts.append("<h2>Variant Details</h2>")
+        html_parts.append(_generate_variant_table(report.variant_details))
+
+    # Metadata
+    if report.metadata:
+        html_parts.append("<h2>Run Metadata</h2>")
+        html_parts.append('<div class="detail-section">')
+        html_parts.append("<table><tr><th>Key</th><th>Value</th></tr>")
+        for k, v in report.metadata.items():
+            html_parts.append(f"<tr><td>{k}</td><td>{v}</td></tr>")
+        html_parts.append("</table>")
+        html_parts.append("</div>")
+
+    # Footer
+    html_parts.append(
+        '<p class="footer">Generated by ASODesigner &mdash; '
+        "in-silico ASO candidate design pipeline</p>"
+    )
+    html_parts.append("</div>")
+    html_parts.append("</body>")
+    html_parts.append("</html>")
+
+    html = "\n".join(html_parts)
+    output_path.write_text(html, encoding="utf-8")
+
+    logger.info("HTML report written to %s", output_path)
+    return output_path
+
+
+def _generate_candidate_table(candidates: list[dict[str, Any]]) -> str:
+    """Generate the candidate table HTML."""
+    parts: list[str] = [
+        "<table>",
+        "<tr><th>Rank</th><th>Sequence</th><th>Start</th><th>End</th>"
+        "<th>Chemistry</th><th>Final Score</th>"
+        "<th>Accessibility</th><th>Thermo</th><th>GC</th>"
+        "<th>Off-Target</th><th>Variant</th><th>Self-Struct</th>"
+        "<th>Position</th></tr>",
+    ]
+    for c in candidates:
+        rank = c.get("rank", "-")
+        seq = c.get("sequence", "")
+        start = c.get("start", 0)
+        end = c.get("end", 0)
+        chem = c.get("chemistry", "")
+        final = c.get("final_score", 0.0)
+        comp = c.get("component_scores", {})
+
+        def _comp_score(key: str, comp_dict: dict = comp) -> str:
+            v = comp_dict.get(key)
+            return _score_bar_html(v) if v is not None else "N/A"
+
+        parts.append(
+            f"<tr><td>{rank}</td><td><code>{seq}</code></td>"
+            f"<td>{start}</td><td>{end}</td><td>{chem}</td>"
+            f"<td>{_score_bar_html(final)}</td>"
+            f"<td>{_comp_score('accessibility')}</td>"
+            f"<td>{_comp_score('thermodynamics')}</td>"
+            f"<td>{_comp_score('gc_content')}</td>"
+            f"<td>{_comp_score('off_target')}</td>"
+            f"<td>{_comp_score('variant')}</td>"
+            f"<td>{_comp_score('self_structure')}</td>"
+            f"<td>{_comp_score('positional')}</td></tr>"
+        )
+    parts.append("</table>")
+    return "\n".join(parts)
+
+
+def _generate_thermo_table(details: list[dict[str, Any]]) -> str:
+    """Generate the thermodynamic details table HTML."""
+    parts: list[str] = [
+        '<div class="detail-section">',
+        "<table><tr><th>Tm (°C)</th><th>Tm Score</th><th>ΔG Duplex</th>"
+        "<th>ΔG Self</th><th>Self Penalty</th><th>ΔG Target</th>"
+        "<th>ΔG Net</th><th>Binding</th></tr>",
+    ]
+    for d in details:
+        binding = _binding_badge(d.get("binding_class", ""))
+        parts.append(
+            f"<tr><td>{d.get('tm', 0):.1f}</td>"
+            f"<td>{_score_bar_html(d.get('tm_score', 0))}</td>"
+            f"<td>{d.get('dg_duplex', 0):.2f}</td>"
+            f"<td>{d.get('dg_self', 0):.2f}</td>"
+            f"<td>{d.get('self_structure_penalty', 0):.4f}</td>"
+            f"<td>{d.get('dg_target', 0):.2f}</td>"
+            f"<td>{d.get('dg_net', 0):.2f}</td>"
+            f"<td>{binding}</td></tr>"
+        )
+    parts.append("</table>")
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _generate_offtarget_table(details: list[dict[str, Any]]) -> str:
+    """Generate the off-target details table HTML."""
+    parts: list[str] = [
+        '<div class="detail-section">',
+        "<table><tr><th>Off-Target Score</th><th>Specificity</th>"
+        "<th>Total Hits</th><th>Off-Target Hits</th>"
+        "<th>Perfect Hits</th></tr>",
+    ]
+    for d in details:
+        score = d.get("off_target_score", 0.0)
+        parts.append(
+            f"<tr><td>{_score_bar_html(score)}</td>"
+            f"<td>{d.get('specificity_class', 'N/A')}</td>"
+            f"<td>{d.get('total_hits', 0)}</td>"
+            f"<td>{d.get('off_target_hits', 0)}</td>"
+            f"<td>{d.get('perfect_hits', 0)}</td></tr>"
+        )
+    parts.append("</table>")
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _generate_variant_table(details: list[dict[str, Any]]) -> str:
+    """Generate the variant details table HTML."""
+    parts: list[str] = [
+        '<div class="detail-section">',
+        "<table><tr><th>Penalty</th><th>Overlapping</th>"
+        "<th>Seed Variants</th><th>Non-Seed Variants</th>"
+        "<th>Pathogenic</th></tr>",
+    ]
+    for d in details:
+        pathogenic = "Yes" if d.get("has_pathogenic") else "No"
+        parts.append(
+            f"<tr><td>{d.get('penalty', 0):.4f}</td>"
+            f"<td>{d.get('overlapping_variants', 0)}</td>"
+            f"<td>{d.get('seed_variants', 0)}</td>"
+            f"<td>{d.get('non_seed_variants', 0)}</td>"
+            f"<td>{pathogenic}</td></tr>"
+        )
+    parts.append("</table>")
+    parts.append("</div>")
+    return "\n".join(parts)
