@@ -446,36 +446,34 @@ def _register_default_components(engine: ScoreEngine) -> None:
     """Register all default score components with the engine.
 
     Each component is imported and registered individually so that
-    missing modules don't prevent the engine from starting.
+    missing components don't prevent the engine from starting.
     """
-    # Import and register each component
-    # Components are defined in Steps 33-34
-    try:
-        from aso_designer.scoring import (
-            AccessibilityScoreComponent,
-            GCContentScoreComponent,
-            OffTargetScoreComponent,
-            PositionalScoreComponent,
-            SelfStructureScoreComponent,
-            ThermodynamicsScoreComponent,
-            VariantScoreComponent,
-        )
+    # Core components (Step 33)
+    _try_register(engine, "AccessibilityScoreComponent")
+    _try_register(engine, "ThermodynamicsScoreComponent")
+    _try_register(engine, "GCContentScoreComponent")
 
-        for component_cls in [
-            AccessibilityScoreComponent,
-            ThermodynamicsScoreComponent,
-            GCContentScoreComponent,
-            OffTargetScoreComponent,
-            VariantScoreComponent,
-            SelfStructureScoreComponent,
-            PositionalScoreComponent,
-        ]:
-            try:
-                engine.register_component(component_cls())
-            except ScoringError as e:
-                logger.debug("Skipping component %s: %s", component_cls.__name__, e)
-    except ImportError:
-        logger.debug("Score components not yet implemented; engine has no components")
+    # Additional components (Step 34)
+    _try_register(engine, "OffTargetScoreComponent")
+    _try_register(engine, "VariantScoreComponent")
+    _try_register(engine, "SelfStructureScoreComponent")
+    _try_register(engine, "PositionalScoreComponent")
+
+
+def _try_register(engine: ScoreEngine, class_name: str) -> None:
+    """Try to import and register a component by class name."""
+    import importlib
+
+    try:
+        module = importlib.import_module("aso_designer.scoring")
+        component_cls = getattr(module, class_name, None)
+        if component_cls is None:
+            return
+        engine.register_component(component_cls())
+    except ScoringError as e:
+        logger.debug("Skipping component %s: %s", class_name, e)
+    except Exception as e:
+        logger.debug("Could not register %s: %s", class_name, e)
 
 
 # ---------------------------------------------------------------------------
