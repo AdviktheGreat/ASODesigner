@@ -322,9 +322,19 @@ class ASOPipeline:
         """Apply pre-filters to candidates."""
         from aso_designer.filters import run_all_filters
 
-        passed = run_all_filters(self._candidates, self.aso_config)
-        self.result.passed_filters = passed
-        logger.info("Passed filters: %d / %d", passed, self.result.total_candidates)
+        cand_cfg = self.aso_config.candidate
+        result = run_all_filters(
+            self._candidates,
+            gc_min=cand_cfg.gc_min,
+            gc_max=cand_cfg.gc_max,
+            homopolymer_max=cand_cfg.homopolymer_max,
+        )
+        self.result.passed_filters = result["total_passed"]
+        logger.info(
+            "Passed filters: %d / %d",
+            self.result.passed_filters,
+            self.result.total_candidates,
+        )
 
     def _stage_accessibility(self) -> None:
         """Compute RNA accessibility features."""
