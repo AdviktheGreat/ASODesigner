@@ -931,3 +931,40 @@ def build_features_dict(
     features["transcript_length"] = transcript_length
 
     return features
+
+
+# ---------------------------------------------------------------------------
+# Final ranking
+# ---------------------------------------------------------------------------
+
+
+def rank_candidates(
+    scored: list[CandidateScore],
+    descending: bool = True,
+) -> list[CandidateScore]:
+    """Rank scored candidates by final score.
+
+    Assigns rank (1 = best) to each candidate and returns them
+    sorted by score.
+
+    Parameters
+    ----------
+    scored : list[CandidateScore]
+        Scored candidates (from score_candidates_batch).
+    descending : bool
+        If True, highest score = rank 1 (default). If False,
+        lowest score = rank 1.
+
+    Returns
+    -------
+    list[CandidateScore]
+        Sorted and ranked candidates.
+    """
+    sorted_scored = sorted(
+        scored,
+        key=lambda c: c.final_score,
+        reverse=descending,
+    )
+    for i, cand in enumerate(sorted_scored):
+        cand.rank = i + 1
+    return sorted_scored
