@@ -1202,3 +1202,78 @@ def assemble_report(
         generate_json=generate_json,
         generate_html=generate_html,
     )
+
+
+def assemble_report_from_config(
+    scored_candidates: list,
+    config: Any,
+    target_name: str = "",
+    target_id: str = "",
+    chemistry: str = "gapmer",
+    total_candidates: int = 0,
+    passed_filters: int = 0,
+    thermodynamic_summaries: list | None = None,
+    off_target_results: list | None = None,
+    variant_annotations: list | None = None,
+    metadata: dict[str, Any] | None = None,
+    basename: str = "aso_report",
+) -> dict[str, Path]:
+    """Assemble and write reports using ReportingConfig settings.
+
+    Reads the ReportingConfig section of the ASO config to determine
+    output directory, whether to generate HTML, and whether to include
+    off-target details.
+
+    Parameters
+    ----------
+    scored_candidates : list[CandidateScore]
+        Scored and ranked candidates.
+    config : ASOConfig
+        Loaded ASO configuration (from config_loader.load_config).
+    target_name : str
+        Target gene name.
+    target_id : str
+        Target transcript accession.
+    chemistry : str
+        Chemistry used.
+    total_candidates : int
+        Total candidates before filtering.
+    passed_filters : int
+        Candidates that passed pre-filters.
+    thermodynamic_summaries : list or None
+        Per-candidate thermodynamic summaries.
+    off_target_results : list or None
+        Per-candidate off-target results.
+    variant_annotations : list or None
+        Per-candidate variant annotations.
+    metadata : dict or None
+        Additional run metadata.
+    basename : str
+        Base filename for reports.
+
+    Returns
+    -------
+    dict[str, Path]
+        Maps format to output file path.
+    """
+    reporting_cfg = config.reporting
+
+    return assemble_report(
+        scored_candidates=scored_candidates,
+        output_dir=reporting_cfg.output_dir,
+        target_name=target_name,
+        target_id=target_id,
+        chemistry=chemistry,
+        total_candidates=total_candidates,
+        passed_filters=passed_filters,
+        thermodynamic_summaries=thermodynamic_summaries,
+        off_target_results=off_target_results,
+        variant_annotations=variant_annotations,
+        metadata=metadata,
+        basename=basename,
+        generate_json=True,
+        generate_html=reporting_cfg.generate_html,
+        include_thermo=True,
+        include_offtarget=reporting_cfg.include_offtarget_details,
+        include_variant=True,
+    )
