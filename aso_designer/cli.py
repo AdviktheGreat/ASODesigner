@@ -511,6 +511,72 @@ def is_accession(target: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# CLI progress and result display
+# ---------------------------------------------------------------------------
+
+
+def print_progress(stage: str, message: str) -> None:
+    """Print a pipeline stage progress message.
+
+    Parameters
+    ----------
+    stage : str
+        Stage name (e.g. "FETCH", "FILTER", "SCORE").
+    message : str
+        Human-readable progress message.
+    """
+    print(f"  [{stage:>8}] {message}")
+
+
+def print_summary_box(title: str, stats: dict) -> None:
+    """Print a summary box with statistics.
+
+    Parameters
+    ----------
+    title : str
+        Box title.
+    stats : dict
+        Statistics to display.
+    """
+    print()
+    print(f"  ┌─ {title} " + "─" * max(0, 50 - len(title)) + "┐")
+    for key, value in stats.items():
+        if isinstance(value, float):
+            val_str = f"{value:.4f}"
+        else:
+            val_str = str(value)
+        key_str = key.replace("_", " ").title()
+        print(f"  │ {key_str:<24} {val_str:>20} │")
+    print("  └" + "─" * 53 + "┘")
+
+
+def print_results_table(scored: list, top_n: int = 10) -> None:
+    """Print scored candidates as a formatted table to stdout.
+
+    Parameters
+    ----------
+    scored : list[CandidateScore]
+        Scored and ranked candidates.
+    top_n : int
+        Maximum rows to display (default 10).
+    """
+    print()
+    print(format_score_table(scored, top_n=top_n))
+    if len(scored) > top_n:
+        print(f"  ... and {len(scored) - top_n} more candidates")
+
+
+def print_error(message: str) -> None:
+    """Print an error message to stderr."""
+    print(f"Error: {message}", file=sys.stderr)
+
+
+def print_success(message: str) -> None:
+    """Print a success message to stdout."""
+    print(f"  ✓ {message}")
+
+
+# ---------------------------------------------------------------------------
 # Subcommand handlers (stubs — implemented in Step 43)
 # ---------------------------------------------------------------------------
 
