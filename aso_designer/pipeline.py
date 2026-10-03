@@ -407,3 +407,78 @@ class ASOPipeline:
         )
         self.result.report_paths = {k: str(v) for k, v in paths.items()}
         logger.info("Reports generated: %s", list(paths.keys()))
+
+
+# ---------------------------------------------------------------------------
+# Convenience function
+# ---------------------------------------------------------------------------
+
+
+def run_pipeline(
+    target: str,
+    chemistry: str = "gapmer",
+    config_path: str | None = None,
+    local_fasta: str | None = None,
+    output_dir: str = "results",
+    top_n: int | None = None,
+    min_score: float = 0.0,
+    run_accessibility: bool = True,
+    run_thermodynamics: bool = True,
+    run_off_target: bool = True,
+    run_variant: bool = True,
+    generate_html: bool = True,
+    organism: str = "Homo sapiens",
+) -> PipelineResult:
+    """Run the full ASO design pipeline in one call.
+
+    Parameters
+    ----------
+    target : str
+        Target gene symbol or transcript accession.
+    chemistry : str
+        ASO chemistry (default "gapmer").
+    config_path : str or None
+        Path to a user YAML config.
+    local_fasta : str or None
+        Path to a local FASTA file (bypasses NCBI).
+    output_dir : str
+        Output directory for reports.
+    top_n : int or None
+        Keep only the top N candidates.
+    min_score : float
+        Minimum score threshold.
+    run_accessibility : bool
+        Run accessibility analysis.
+    run_thermodynamics : bool
+        Run thermodynamic analysis.
+    run_off_target : bool
+        Run off-target analysis.
+    run_variant : bool
+        Run variant annotation.
+    generate_html : bool
+        Generate HTML report.
+    organism : str
+        Organism for NCBI lookup.
+
+    Returns
+    -------
+    PipelineResult
+        Structured output of the pipeline run.
+    """
+    config = PipelineConfig(
+        target=target,
+        organism=organism,
+        chemistry=chemistry,
+        config_path=config_path,
+        local_fasta=local_fasta,
+        output_dir=output_dir,
+        top_n=top_n,
+        min_score=min_score,
+        run_accessibility=run_accessibility,
+        run_thermodynamics=run_thermodynamics,
+        run_off_target=run_off_target,
+        run_variant=run_variant,
+        generate_html=generate_html,
+    )
+    pipeline = ASOPipeline(config)
+    return pipeline.run()
