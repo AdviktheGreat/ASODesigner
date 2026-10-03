@@ -15,7 +15,9 @@ Inspired by GuideX's reporting approach but redesigned with:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from aso_designer.utils.logger import get_logger
@@ -167,3 +169,64 @@ class ReportData:
             variant_details=data.get("variant_details", []),
             metadata=data.get("metadata", {}),
         )
+
+
+# ---------------------------------------------------------------------------
+# JSON report generation
+# ---------------------------------------------------------------------------
+
+
+def generate_json_report(
+    report: ReportData,
+    output_path: str | Path,
+    indent: int = 2,
+) -> Path:
+    """Write a ReportData to a JSON file.
+
+    Parameters
+    ----------
+    report : ReportData
+        Complete report data to serialize.
+    output_path : str or Path
+        Output JSON file path. Parent directories are created.
+    indent : int
+        JSON indentation (default 2).
+
+    Returns
+    -------
+    Path
+        Path to the written file.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    data = report.to_dict()
+
+    output_path.write_text(
+        json.dumps(data, indent=indent, default=str, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    logger.info("JSON report written to %s", output_path)
+    return output_path
+
+
+def load_json_report(input_path: str | Path) -> ReportData:
+    """Load a ReportData from a JSON file.
+
+    Parameters
+    ----------
+    input_path : str or Path
+        Path to a JSON report file.
+
+    Returns
+    -------
+    ReportData
+        Deserialized report data.
+    """
+    input_path = Path(input_path)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Report file not found: {input_path}")
+
+    data = json.loads(input_path.read_text(encoding="utf-8"))
+    return ReportData.from_dict(data)
