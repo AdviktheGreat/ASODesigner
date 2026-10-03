@@ -152,6 +152,98 @@ aso_designer/
 
 Each stage can be toggled via CLI flags or configuration.
 
+## Configuration
+
+ASODesigner uses a layered YAML configuration system:
+
+1. **Bundled defaults** (`aso_designer/config/aso_config.yaml`)
+2. **Chemistry presets** (`aso_designer/config/chemistry_presets.yaml`)
+3. **User config** (passed via `--config`)
+
+Later layers override earlier ones. All configuration is validated by a
+Pydantic schema with cross-field validation (e.g., scoring weights must
+sum to 1.0).
+
+### Key configuration sections
+
+```yaml
+candidate:
+  length: 20          # ASO length (10–30 nt)
+  step: 1             # Sliding window step
+  gc_min: 0.30        # Minimum GC content
+  gc_max: 0.60        # Maximum GC content
+  homopolymer_max: 4  # Max consecutive identical bases
+  chemistry: gapmer
+
+scoring:
+  weights:
+    accessibility: 0.25
+    thermodynamics: 0.20
+    gc_content: 0.10
+    off_target: 0.20
+    variant: 0.10
+    self_structure: 0.10
+    positional: 0.05
+
+reporting:
+  output_dir: results
+  generate_html: true
+  include_offtarget_details: true
+```
+
+### Chemistry presets
+
+Each chemistry has preset adjustments for Tm, self-structure weight, and
+bonuses. Available chemistries: `gapmer`, `mixmer`, `2ome`, `moe`,
+`morpholino`, `full`.
+
+```bash
+# View presets for a specific chemistry
+asodesigner info --chemistry mixmer --show-presets
+```
+
+### Custom configuration
+
+```bash
+# Use a custom config file
+asodesigner design --target BRCA1 --config my_config.yaml --output-dir results/
+```
+
+## Scoring
+
+Candidates are scored by a weighted composite of 7 components:
+
+| Component | Weight | Description |
+|---|---|---|
+| Accessibility | 0.25 | RNAplfold-based target site accessibility |
+| Thermodynamics | 0.20 | Tm score + binding class classification |
+| GC Content | 0.10 | Optimal range 30–60% |
+| Off-target | 0.20 | Transcriptome-wide specificity |
+| Variant | 0.10 | SNP/pathogenic overlap penalty |
+| Self-structure | 0.10 | Self-folding penalty |
+| Positional | 0.05 | Region preference (CDS > 5UTR > 3UTR) |
+
+Each component returns a score in [0, 1]. The composite score is the
+weighted sum, plus an optional chemistry bonus, clamped to [0, 1].
+Candidates are ranked by composite score and filtered by configurable
+thresholds.
+
+## Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=aso_designer
+
+# Run specific test module
+pytest tests/test_scoring.py -v
+```
+
+The test suite includes 550+ tests covering all modules, with mocked
+ViennaRNA and NCBI calls for reproducibility.
+
 ## Disclaimer
 
 ASODesigner is an **in-silico research and candidate-ranking tool**. It does
