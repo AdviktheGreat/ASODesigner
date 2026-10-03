@@ -173,3 +173,227 @@ class PipelineResult:
     def success(self) -> bool:
         """True if the pipeline produced at least one ranked candidate."""
         return self.ranked_candidates > 0
+
+
+# ---------------------------------------------------------------------------
+# Pipeline orchestration
+# ---------------------------------------------------------------------------
+
+
+class ASOPipeline:
+    """Orchestrates the full ASO design pipeline.
+
+    Runs stages in order: fetch → generate → filter → (accessibility →
+    thermodynamics → off-target → variant) → score → rank → report.
+    Each stage can be toggled via PipelineConfig.
+
+    Parameters
+    ----------
+    config : PipelineConfig
+        Pipeline configuration.
+    """
+
+    def __init__(self, config: PipelineConfig):
+        self.config = config
+        self.result = PipelineResult(target=config.target)
+        self._config = None  # ASOConfig (loaded lazily)
+        self._transcript = None  # TranscriptRecord
+        self._candidates: list = []  # list[ASOCandidate]
+        self._scored: list = []  # list[CandidateScore]
+        self._thermo_summaries: list = []
+        self._off_target_results: list = []
+        self._variant_annotations: list = []
+
+    @property
+    def aso_config(self):
+        """Lazily loaded ASOConfig from config system."""
+        if self._config is None:
+            from aso_designer.config_loader import load_config
+
+            self._config = load_config(
+                self.config.config_path,
+                chemistry=self.config.chemistry,
+            )
+        return self._config
+
+    def run(self) -> PipelineResult:
+        """Run the full pipeline.
+
+        Executes all enabled stages in order, collecting results and
+        errors. Non-fatal errors are logged and recorded but do not
+        stop the pipeline.
+
+        Returns
+        -------
+        PipelineResult
+            Structured output of the pipeline run.
+        """
+        logger.info("Starting ASO pipeline for target: %s", self.config.target)
+
+        stages: list[tuple[str, callable]] = [
+            ("fetch", self._stage_fetch),
+            ("generate", self._stage_generate),
+            ("filter", self._stage_filter),
+        ]
+
+        if self.config.run_accessibility:
+            stages.append(("accessibility", self._stage_accessibility))
+        if self.config.run_thermodynamics:
+            stages.append(("thermodynamics", self._stage_thermodynamics))
+        if self.config.run_off_target:
+            stages.append(("off_target", self._stage_off_target))
+        if self.config.run_variant:
+            stages.append(("variant", self._stage_variant))
+
+        stages.append(("score", self._stage_score))
+        stages.append(("report", self._stage_report))
+
+        for stage_name, stage_fn in stages:
+            try:
+                logger.info("Running stage: %s", stage_name)
+                stage_fn()
+                self.result.stages_run.append(stage_name)
+            except Exception as e:
+                msg = f"Stage '{stage_name}' failed: {e}"
+                logger.error(msg)
+                self.result.errors.append(msg)
+                # Some stages are non-fatal
+                if stage_name in ("accessibility", "off_target", "variant"):
+                    continue
+                break
+
+        logger.info(
+            "Pipeline complete: %d candidates, %d ranked, top score %.4f",
+            self.result.total_candidates,
+            self.result.ranked_candidates,
+            self.result.top_score,
+        )
+        return self.result
+
+    # -----------------------------------------------------------------------
+    # Stage methods
+    # -----------------------------------------------------------------------
+
+    def _stage_fetch(self) -> None:
+        """Fetch the target transcript."""
+        from aso_designer.cli import is_accession
+        from aso_designer.fetch_manager import FetchManager
+
+        fm = FetchManager(local_fasta=self.config.local_fasta)
+
+        if self.config.local_fasta:
+            logger.info("Loading from local FASTA: %s", self.config.local_fasta)
+            from aso_designer.local_loader import load_fasta
+
+            records = load_fasta(self.config.local_fasta)
+            if records:
+                self._transcript = records[0]
+        elif is_accession(self.config.target):
+            logger.info("Fetching by accession: %s", self.config.target)
+            self._transcript = fm.fetch_by_accession(self.config.target)
+        else:
+            logger.info("Fetching by gene symbol: %s", self.config.target)
+            records = fm.fetch_by_gene(self.config.target, self.config.organism)
+            if records:
+                self._transcript = records[0]
+
+        if self._transcript is None:
+            raise RuntimeError(f"Could not fetch transcript for {self.config.target}")
+
+        self.result.transcript_id = self._transcript.accession
+        self.result.transcript_length = len(self._transcript.sequence)
+        logger.info("Fetched %s (%d bp)", self.result.transcript_id, self.result.transcript_length)
+
+    def _stage_generate(self) -> None:
+        """Generate ASO candidates via sliding window."""
+        from aso_designer.candidate_generator import generate_candidates
+
+        if self._transcript is None:
+            raise RuntimeError("No transcript available for candidate generation")
+
+        self._candidates = generate_candidates(
+            sequence=self._transcript.sequence,
+            config=self.aso_config.candidate,
+        )
+        self.result.total_candidates = len(self._candidates)
+        logger.info("Generated %d candidates", self.result.total_candidates)
+
+    def _stage_filter(self) -> None:
+        """Apply pre-filters to candidates."""
+        from aso_designer.filters import run_all_filters
+
+        passed = run_all_filters(self._candidates, self.aso_config)
+        self.result.passed_filters = passed
+        logger.info("Passed filters: %d / %d", passed, self.result.total_candidates)
+
+    def _stage_accessibility(self) -> None:
+        """Compute RNA accessibility features."""
+        logger.info("Accessibility stage (placeholder — requires ViennaRNA)")
+
+    def _stage_thermodynamics(self) -> None:
+        """Compute thermodynamic features."""
+        logger.info("Thermodynamics stage (placeholder — requires ViennaRNA)")
+
+    def _stage_off_target(self) -> None:
+        """Run off-target analysis."""
+        logger.info("Off-target stage (placeholder — requires transcriptome)")
+
+    def _stage_variant(self) -> None:
+        """Run variant/SNP annotation."""
+        logger.info("Variant stage (placeholder — requires variant data)")
+
+    def _stage_score(self) -> None:
+        """Score and rank candidates."""
+        from aso_designer.scoring import rank_and_filter, score_candidates_batch
+
+        if not self._candidates:
+            logger.warning("No candidates to score")
+            return
+
+        # Build features dicts from candidates that passed filters
+        passed = [c for c in self._candidates if c.passes_filters]
+        features_list = [{} for _ in passed]
+
+        self._scored = score_candidates_batch(passed, features_list)
+        self.result.scored_candidates = len(self._scored)
+
+        ranking = rank_and_filter(
+            self._scored,
+            min_score=self.config.min_score,
+            top_n=self.config.top_n,
+        )
+        self._scored = ranking.candidates
+        self.result.ranked_candidates = ranking.ranked_candidates
+        self.result.top_score = ranking.top_score
+        logger.info(
+            "Scored %d, ranked %d, top score %.4f",
+            self.result.scored_candidates,
+            self.result.ranked_candidates,
+            self.result.top_score,
+        )
+
+    def _stage_report(self) -> None:
+        """Generate JSON and HTML reports."""
+        from aso_designer.reporting import assemble_report
+
+        if not self._scored:
+            logger.warning("No scored candidates to report")
+            return
+
+        paths = assemble_report(
+            scored_candidates=self._scored,
+            output_dir=self.config.output_dir,
+            target_name=self.config.target,
+            target_id=self.result.transcript_id,
+            chemistry=self.config.chemistry,
+            total_candidates=self.result.total_candidates,
+            passed_filters=self.result.passed_filters,
+            thermodynamic_summaries=self._thermo_summaries or None,
+            off_target_results=self._off_target_results or None,
+            variant_annotations=self._variant_annotations or None,
+            metadata={"version": "0.0.1", "stages_run": self.result.stages_run},
+            basename=f"{self.config.target}_report",
+            generate_html=self.config.generate_html,
+        )
+        self.result.report_paths = {k: str(v) for k, v in paths.items()}
+        logger.info("Reports generated: %s", list(paths.keys()))
