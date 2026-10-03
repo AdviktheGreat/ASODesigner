@@ -286,3 +286,97 @@ The variant penalty combines:
 | Moderate risk | Variant overlap in seed region, or pathogenic in non-seed |
 | Low risk | Variant overlap in non-seed region only |
 | No risk | No overlapping variants |
+
+## Scoring
+
+### Score components
+
+ASODesigner uses a pluggable component architecture for scoring. Each
+component implements the `ScoreComponent` protocol and returns a
+sub-score in [0.0, 1.0]. The `ScoreEngine` combines components into a
+weighted composite score.
+
+### Component details
+
+#### 1. Accessibility (weight: 0.25)
+
+Uses the RNAplfold-based accessibility score directly. If accessibility
+was not computed, returns a neutral 0.5.
+
+$$\text{score}_{accessibility} = \text{accessibility\_score}$$
+
+#### 2. Thermodynamics (weight: 0.20)
+
+Combines Tm score and binding class:
+
+$$\text{score}_{thermo} = 0.6 \times \text{Tm\_score} + 0.4 \times \text{binding\_class\_score}$$
+
+Binding class scores: strong=1.0, moderate=0.5, weak=0.0.
+
+#### 3. GC content (weight: 0.10)
+
+Optimal range is 30–60%. Within range: 1.0. Outside: linear decrease
+to 0.0 at GC=0.0 or GC=1.0.
+
+#### 4. Off-target (weight: 0.20)
+
+Uses the off-target specificity score directly. If not computed,
+returns neutral 0.5.
+
+#### 5. Variant (weight: 0.10)
+
+Converts variant penalty to a score:
+
+$$\text{score}_{variant} = 1.0 - \text{variant\_penalty}$$
+
+Clamped to [0, 1]. If no variant data, returns 1.0 (no penalty).
+
+#### 6. Self-structure (weight: 0.10)
+
+Converts self-structure penalty to a score:
+
+$$\text{score}_{self} = 1.0 - \text{self\_structure\_penalty}$$
+
+Clamped to [0, 1]. If no self-structure data, returns 1.0.
+
+#### 7. Positional (weight: 0.05)
+
+Region-based base score with center-of-transcript position bonus:
+
+| Region | Base Score |
+|---|---|
+| CDS | 1.0 |
+| 5UTR | 0.7 |
+| 3UTR | 0.5 |
+| noncoding | 0.6 |
+| unknown | 0.3 |
+
+A position bonus (up to 0.1) is added for candidates near the center
+of the transcript, decreasing linearly to 0 at the ends.
+
+### Composite score
+
+$$\text{composite} = \sum_{i} w_i \times \text{score}_i$$
+
+$$\text{final} = \text{clamp}(\text{composite} + \text{chemistry\_bonus}, 0, 1)$$
+
+Where $w_i$ are the component weights (summing to 1.0) and
+`chemistry_bonus` is an optional per-chemistry additive bonus.
+
+### Ranking and filtering
+
+Candidates are ranked by final score (descending). The pipeline
+supports:
+
+- **Minimum score threshold** — Candidates below `min_score` are removed
+- **Top-N selection** — Keep only the top N candidates
+- **Rank assignment** — Each candidate gets a rank (1 = best)
+
+### Chemistry-aware adjustments
+
+Each chemistry preset can adjust:
+- Tm (additive correction)
+- Self-structure weight (multiplier on self-structure penalty)
+- Scoring bonus (additive to composite score)
+
+These are applied automatically based on the `--chemistry` flag.
