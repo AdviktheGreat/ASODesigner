@@ -7,6 +7,25 @@ with nested models, cross-field validation, and detailed field descriptions.
 from pydantic import BaseModel, Field, confloat, conint, model_validator
 
 
+class FetchConfig(BaseModel):
+    """NCBI E-utilities access parameters."""
+
+    email: str | None = Field(
+        default=None,
+        description=(
+            "Email address for NCBI API identification (recommended by NCBI). "
+            "Falls back to the NCBI_EMAIL environment variable."
+        ),
+    )
+    api_key: str | None = Field(
+        default=None,
+        description=(
+            "NCBI API key for higher rate limits (10 req/s vs 3 req/s). "
+            "Falls back to the NCBI_API_KEY environment variable."
+        ),
+    )
+
+
 class CandidateConfig(BaseModel):
     """Candidate generation parameters."""
 
@@ -210,6 +229,7 @@ class ReportingConfig(BaseModel):
 class ASOConfig(BaseModel):
     """Top-level ASODesigner configuration."""
 
+    fetch: FetchConfig = Field(default_factory=FetchConfig)
     candidate: CandidateConfig = Field(default_factory=CandidateConfig)
     gapmer: GapmerConfig = Field(default_factory=GapmerConfig)
     mixmer: MixmerConfig = Field(default_factory=MixmerConfig)

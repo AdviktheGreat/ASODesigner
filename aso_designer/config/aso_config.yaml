@@ -4,6 +4,21 @@
 # Override any of these by providing your own YAML config file or CLI flags.
 
 # ---------------------------------------------------------------------------
+# NCBI access (used by transcript and variant fetching)
+# ---------------------------------------------------------------------------
+# Uncomment and fill in to identify yourself to NCBI E-utilities and/or
+# raise the rate limit. Falls back to the NCBI_EMAIL and NCBI_API_KEY
+# environment variables when omitted.
+#
+# fetch:
+#   # Email address for NCBI API identification (recommended by NCBI).
+#   email: user@example.com
+#
+#   # NCBI API key for higher rate limits (10 req/s vs 3 req/s without one).
+#   # Get a key at https://www.ncbi.nlm.nih.gov/account/.
+#   api_key: your_api_key
+
+# ---------------------------------------------------------------------------
 # Candidate generation
 # ---------------------------------------------------------------------------
 candidate:

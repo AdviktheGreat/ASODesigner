@@ -145,6 +145,18 @@ class TestDataPathOptions:
         config = load_config(str(f))
         assert config.variant.vcf_path == "/data/variants.vcf"
 
+    def test_fetch_config_defaults(self):
+        config = load_config()
+        assert config.fetch.email is None
+        assert config.fetch.api_key is None
+
+    def test_fetch_config_override(self, tmp_path):
+        f = tmp_path / "custom.yaml"
+        f.write_text('fetch:\n  email: "user@example.com"\n  api_key: "abc123"\n')
+        config = load_config(str(f))
+        assert config.fetch.email == "user@example.com"
+        assert config.fetch.api_key == "abc123"
+
 
 # ---------------------------------------------------------------------------
 # _apply_chemistry_preset
