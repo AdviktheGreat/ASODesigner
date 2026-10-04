@@ -46,6 +46,12 @@ class PipelineConfig:
         Path to a user YAML config (overrides defaults).
     local_fasta : str or None
         Path to a local FASTA file (bypasses NCBI).
+    transcriptome_path : str or None
+        Path to a transcriptome FASTA for off-target search (overrides
+        the off_target.transcriptome_path config option).
+    vcf_path : str or None
+        Path to a VCF file with known variants (overrides the
+        variant.vcf_path config option).
     output_dir : str
         Output directory for reports (default "results").
     top_n : int or None
@@ -69,6 +75,8 @@ class PipelineConfig:
     chemistry: str = "gapmer"
     config_path: str | None = None
     local_fasta: str | None = None
+    transcriptome_path: str | None = None
+    vcf_path: str | None = None
     output_dir: str = "results"
     top_n: int | None = None
     min_score: float = 0.0
@@ -97,6 +105,8 @@ class PipelineConfig:
             chemistry=getattr(args, "chemistry", "gapmer"),
             config_path=getattr(args, "config", None),
             local_fasta=getattr(args, "local_fasta", None),
+            transcriptome_path=getattr(args, "transcriptome", None),
+            vcf_path=getattr(args, "vcf", None),
             output_dir=getattr(args, "output_dir", "results"),
             top_n=getattr(args, "top_n", None),
             min_score=getattr(args, "min_score", 0.0),
@@ -440,8 +450,87 @@ class ASOPipeline:
         logger.info("Computed thermodynamics for %d candidates", computed)
 
     def _stage_off_target(self) -> None:
-        """Run off-target analysis."""
-        logger.info("Off-target stage (placeholder — requires transcriptome)")
+        """Run transcriptome-wide off-target analysis for passing candidates.
+
+        Builds a k-mer index over the configured transcriptome FASTA
+        (``off_target.transcriptome_path`` or the pipeline-level
+        ``transcriptome_path``), searches each candidate's binding site
+        with the seed-and-extend strategy, and stores the specificity
+        score in ``candidate.features["off_target_score"]``. Results are
+        also collected in ``self._off_target_results`` for reporting.
+
+        If no transcriptome is configured, the stage logs a warning and
+        returns, leaving candidates with neutral off-target scores.
+        """
+        from aso_designer.off_target import (
+            OffTargetSearchEngine,
+            TranscriptomeReference,
+            score_off_target,
+        )
+
+        if self._transcript is None:
+            raise RuntimeError("No transcript available for off-target analysis")
+
+        ot_cfg = self.aso_config.off_target
+        transcriptome_path = self.config.transcriptome_path or ot_cfg.transcriptome_path
+
+        if not transcriptome_path:
+            logger.warning(
+                "No transcriptome FASTA configured — skipping off-target "
+                "analysis (neutral scores will be used)"
+            )
+            return
+
+        reference = TranscriptomeReference()
+        try:
+            reference.load_from_fasta(transcriptome_path)
+        except Exception as e:
+            logger.warning(
+                "Could not load transcriptome %s (%s) — skipping off-target analysis",
+                transcriptome_path,
+                e,
+            )
+            return
+        if reference.num_transcripts == 0:
+            logger.warning(
+                "Transcriptome FASTA %s contains no sequences — skipping off-target analysis",
+                transcriptome_path,
+            )
+            return
+        logger.info(
+            "Built off-target reference: %d transcripts, %d nt total",
+            reference.num_transcripts,
+            reference.total_length,
+        )
+
+        engine = OffTargetSearchEngine(
+            reference,
+            max_mismatches=ot_cfg.max_mismatches,
+            seed_start=ot_cfg.seed_start,
+            seed_end=ot_cfg.seed_end,
+        )
+
+        scored = 0
+        for candidate in self._candidates:
+            if not candidate.passes_filters:
+                continue
+            hits = engine.search(
+                candidate.sequence,
+                on_target_transcript=self.result.transcript_id,
+                on_target_position=candidate.start,
+            )
+            result, score, classification = score_off_target(
+                candidate.sequence,
+                hits,
+                seed_mismatch_weight=ot_cfg.seed_mismatch_weight,
+                max_hits=ot_cfg.max_hits,
+            )
+            candidate.features["off_target_score"] = score
+            candidate.features["off_target_class"] = classification
+            self._off_target_results.append(result)
+            scored += 1
+
+        logger.info("Scored off-targets for %d candidates", scored)
 
     def _stage_variant(self) -> None:
         """Run variant/SNP annotation."""
@@ -514,6 +603,8 @@ def run_pipeline(
     chemistry: str = "gapmer",
     config_path: str | None = None,
     local_fasta: str | None = None,
+    transcriptome_path: str | None = None,
+    vcf_path: str | None = None,
     output_dir: str = "results",
     top_n: int | None = None,
     min_score: float = 0.0,
@@ -536,6 +627,10 @@ def run_pipeline(
         Path to a user YAML config.
     local_fasta : str or None
         Path to a local FASTA file (bypasses NCBI).
+    transcriptome_path : str or None
+        Path to a transcriptome FASTA for off-target search.
+    vcf_path : str or None
+        Path to a VCF file with known variants.
     output_dir : str
         Output directory for reports.
     top_n : int or None
@@ -566,6 +661,8 @@ def run_pipeline(
         chemistry=chemistry,
         config_path=config_path,
         local_fasta=local_fasta,
+        transcriptome_path=transcriptome_path,
+        vcf_path=vcf_path,
         output_dir=output_dir,
         top_n=top_n,
         min_score=min_score,

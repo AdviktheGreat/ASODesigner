@@ -226,3 +226,108 @@ class TestThermodynamicsStage:
         pipeline._transcript = None
         with pytest.raises(RuntimeError, match="No transcript"):
             pipeline._stage_thermodynamics()
+
+
+# ---------------------------------------------------------------------------
+# Off-target stage
+# ---------------------------------------------------------------------------
+
+
+class TestOffTargetStage:
+    @staticmethod
+    def _write_fasta(path, entries):
+        with open(path, "w") as f:
+            for header, seq in entries:
+                f.write(f">{header}\n{seq}\n")
+
+    def test_skips_without_transcriptome(self):
+        """No transcriptome configured -> warn and return, no crash."""
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_off_target()
+
+        for c in passing_candidates(pipeline):
+            assert "off_target_score" not in c.features
+
+    def test_scores_with_transcriptome(self, tmp_path):
+        from aso_designer.utils.sequence import reverse_complement
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        passing = passing_candidates(pipeline)
+        assert passing
+        probe = passing[0].sequence
+
+        fasta = tmp_path / "transcriptome.fna"
+        self._write_fasta(
+            fasta,
+            [
+                ("NM_TEST.1 TESTGENE", TRANSCRIPT_SEQ),
+                ("NM_DECOY.1 DECOYGENE", reverse_complement(probe) * 2),
+            ],
+        )
+        pipeline.config.transcriptome_path = str(fasta)
+        pipeline._stage_off_target()
+
+        scored = [c for c in passing if "off_target_score" in c.features]
+        assert len(scored) == len(passing)
+        for c in scored:
+            assert 0.0 <= c.features["off_target_score"] <= 1.0
+            assert c.features["off_target_class"] in (
+                "specific",
+                "moderate",
+                "non-specific",
+            )
+
+    def test_off_target_hit_reduces_score(self, tmp_path):
+        """A candidate with an exact off-target match should score lower
+        than candidates without one."""
+        from aso_designer.utils.sequence import reverse_complement
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        passing = passing_candidates(pipeline)
+        probe = passing[0].sequence
+
+        fasta = tmp_path / "transcriptome.fna"
+        self._write_fasta(
+            fasta,
+            [
+                ("NM_TEST.1 TESTGENE", TRANSCRIPT_SEQ),
+                ("NM_DECOY.1 DECOYGENE", reverse_complement(probe) * 2),
+            ],
+        )
+        pipeline.config.transcriptome_path = str(fasta)
+        pipeline._stage_off_target()
+
+        probe_score = next(c.features["off_target_score"] for c in passing if c.sequence == probe)
+        other_scores = [c.features["off_target_score"] for c in passing if c.sequence != probe]
+        assert other_scores
+        assert probe_score < max(other_scores)
+
+    def test_results_collected_for_reporting(self, tmp_path):
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        fasta = tmp_path / "transcriptome.fna"
+        self._write_fasta(fasta, [("NM_TEST.1 TESTGENE", TRANSCRIPT_SEQ)])
+        pipeline.config.transcriptome_path = str(fasta)
+        pipeline._stage_off_target()
+
+        assert len(pipeline._off_target_results) == len(passing_candidates(pipeline))
+
+    def test_empty_fasta_skips(self, tmp_path):
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        fasta = tmp_path / "empty.fna"
+        fasta.write_text("")
+        pipeline.config.transcriptome_path = str(fasta)
+        pipeline._stage_off_target()
+
+        for c in passing_candidates(pipeline):
+            assert "off_target_score" not in c.features
+
+    def test_no_transcript_raises(self):
+        pipeline = make_pipeline()
+        pipeline._transcript = None
+        with pytest.raises(RuntimeError, match="No transcript"):
+            pipeline._stage_off_target()
