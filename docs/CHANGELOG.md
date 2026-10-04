@@ -2,6 +2,31 @@
 
 All notable changes to ASODesigner are documented in this file.
 
+## [1.0.0] — 2026-10-04
+
+Initial release of ASODesigner. All 52 implementation steps complete
+across 12 phases. 602 tests passing, 85% code coverage.
+
+### Highlights
+
+- Full ASO design pipeline: fetch → generate → filter → score → report
+- 7 score components with transparent weighted composite scoring
+- 5 chemistry types: gapmer, mixmer, 2'-OMe, MOE, morpholino
+- JSON and HTML report generation with SVG score distribution charts
+- CLI with 4 subcommands: design, score, report, info
+- Configurable via YAML with chemistry presets and Pydantic validation
+- 602 tests with 85% code coverage
+- Comprehensive documentation: README, methodology, API reference,
+  installation guide, usage guide, and examples
+
+### Statistics
+
+- 28 Python modules in `aso_designer/`
+- 18 test files with 602 tests
+- 54 files passing ruff check and format
+- 85% test coverage (excluding network-dependent and CLI subprocess code)
+- 6 example scripts and configurations
+
 ## [0.0.1] — 2026-10-03
 
 Initial development release. All core pipeline stages implemented and
