@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from aso_designer.thermodynamics import (
+    _RNA_NN,
     DuplexResult,
     SelfStructureResult,
     TargetStructureResult,
@@ -47,6 +48,67 @@ class TestCalculateNNThermodynamics:
         dh, ds = calculate_nn_thermodynamics("GCGCGCGC", rna=True)
         assert dh < 0
         assert ds < 0
+
+    def test_turner2004_rna_table_values(self):
+        """The 10 unique Turner 2004 (Xia et al. 1998) stacking parameters
+        must match the NNDB-published ΔH/ΔS values exactly.
+
+        Source: https://rna.urmc.rochester.edu/NNDB/turner04
+        (ΔS derived from published ΔG°37 and ΔH° at 310.15 K).
+        """
+        expected_unique = {
+            "AA": (-6.82, -19.0),
+            "AU": (-9.38, -26.7),
+            "UA": (-7.69, -20.5),
+            "CU": (-10.48, -27.1),
+            "CA": (-10.44, -26.9),
+            "GU": (-11.40, -29.5),
+            "GA": (-12.44, -32.5),
+            "CG": (-10.64, -26.7),
+            "GG": (-13.39, -32.7),
+            "GC": (-14.88, -36.9),
+        }
+        for pair, (dh, ds) in expected_unique.items():
+            actual = _RNA_NN[pair]
+            assert actual[0] == pytest.approx(dh, abs=1e-9), f"{pair} ΔH"
+            assert actual[1] == pytest.approx(ds, abs=1e-9), f"{pair} ΔS"
+
+    def test_turner2004_reverse_complement_symmetry(self):
+        """Symmetric expansions must equal their unique parameter."""
+        symmetry_pairs = {
+            "AA": "UU",
+            "AC": "GU",
+            "AG": "CU",
+            "CA": "UG",
+            "CC": "GG",
+            "GA": "UC",
+        }
+        for a, b in symmetry_pairs.items():
+            assert _RNA_NN[a] == _RNA_NN[b], f"{a} and {b} must share parameters"
+
+    def test_turner2004_gc_terminal_initiation(self):
+        """GC-terminal RNA duplex: stacks + intermolecular initiation +
+        symmetry (self-complementary), no AU end penalty.
+
+        GCGCGCGC: 4×GC + 3×CG stacks, both terminals GC, self-complementary.
+        ΔH = 4(-14.88) + 3(-10.64) + 3.61 = -87.83
+        ΔS = 4(-36.9) + 3(-26.7) + (-1.5) + (-1.4) = -230.6
+        """
+        dh, ds = calculate_nn_thermodynamics("GCGCGCGC", rna=True)
+        assert dh == pytest.approx(-87.83, abs=1e-9)
+        assert ds == pytest.approx(-230.6, abs=1e-9)
+
+    def test_turner2004_au_terminal_initiation(self):
+        """AU-terminal RNA duplex: stacks + intermolecular initiation +
+        one AU end penalty, non-self-complementary.
+
+        AUGCAUGC: AU×2, UG×2, GC×2, CA×1 stacks; terminals A (AU) and C.
+        ΔH = -18.76 - 20.88 - 29.76 - 10.44 + 3.61 + 3.72 = -72.51
+        ΔS = -53.4 - 53.8 - 73.8 - 26.9 - 1.5 + 10.5 = -198.9
+        """
+        dh, ds = calculate_nn_thermodynamics("AUGCAUGC", rna=True)
+        assert dh == pytest.approx(-72.51, abs=1e-9)
+        assert ds == pytest.approx(-198.9, abs=1e-9)
 
     def test_dna_vs_rna_different(self):
         dh_dna, _ = calculate_nn_thermodynamics("GCGCGCGC", rna=False)

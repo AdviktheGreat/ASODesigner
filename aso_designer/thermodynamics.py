@@ -66,37 +66,46 @@ _DNA_SYMMETRY = (0.0, -1.4)
 
 # ---------------------------------------------------------------------------
 # Turner 2004 NN parameters for RNA/RNA
-# Reference: Turner & Mathews (2010) Nucleic Acids Res 38:D280-D282
-# (2004 parameters as curated in the NNDB)
-# Units: ΔH in kcal/mol, ΔS in cal/(mol·K)
+# Reference: Xia et al. (1998) Biochemistry 37:14719-14735, as compiled in
+# the Turner 2004 Nearest Neighbor Database (NNDB),
+# https://rna.urmc.rochester.edu/NNDB/ (Turner & Mathews 2010).
+# Units: ΔH in kcal/mol, ΔS in cal/(mol·K). ΔS values are derived from the
+# published ΔG°37 and ΔH° via ΔS = (ΔH − ΔG°37) × 1000 / 310.15.
+# Key format: "XY" = 5'-X Y-3' / 3'-revcomp(XY)-5' (top strand 5'→3');
+# entries marked "= ZW" are equal to ZW by reverse-complement symmetry.
 # ---------------------------------------------------------------------------
 
 _RNA_NN: dict[str, tuple[float, float]] = {
     # NN pair (5'-3'/3'-5'): (ΔH, ΔS)
-    "AA": (-6.82, -19.0),
-    "AC": (-8.40, -22.4),
-    "AG": (-7.60, -19.9),
-    "AU": (-7.20, -20.4),
-    "CA": (-8.40, -22.4),
-    "CC": (-8.00, -19.9),
-    "CG": (-10.60, -27.2),
-    "CU": (-7.60, -19.9),
-    "GA": (-7.60, -20.5),
-    "GC": (-13.20, -32.9),
-    "GG": (-8.00, -19.9),
-    "GU": (-8.40, -22.4),
-    "UA": (-7.20, -21.3),
-    "UC": (-7.60, -19.9),
-    "UG": (-8.40, -22.4),
+    "AA": (-6.82, -19.0),  # = UU
+    "AC": (-11.40, -29.5),  # = GU
+    "AG": (-10.48, -27.1),  # = CU
+    "AU": (-9.38, -26.7),
+    "CA": (-10.44, -26.9),  # = UG
+    "CC": (-13.39, -32.7),  # = GG
+    "CG": (-10.64, -26.7),
+    "CU": (-10.48, -27.1),
+    "GA": (-12.44, -32.5),  # = UC
+    "GC": (-14.88, -36.9),
+    "GG": (-13.39, -32.7),
+    "GU": (-11.40, -29.5),
+    "UA": (-7.69, -20.5),
+    "UC": (-12.44, -32.5),
+    "UG": (-10.44, -26.9),
     "UU": (-6.82, -19.0),
 }
 
-# RNA initiation parameters (Turner 2004)
-# Terminal G·C: ΔH = 0.0, ΔS = -4.0 (approximate)
-# Terminal A·U: ΔH = 0.0, ΔS = -1.0 (approximate)
-_RNA_INIT_GC = (0.0, -4.0)
-_RNA_INIT_AT = (0.0, -1.0)
-# Symmetry correction for self-complementary RNA
+# RNA initiation parameters (Turner 2004 / Xia et al. 1998, from the NNDB)
+# Intermolecular initiation: ΔH = +3.61 kcal/mol, ΔG°37 = +4.09 kcal/mol
+#   → ΔS = (3.61 − 4.09) × 1000 / 310.15 = −1.5 cal/(mol·K)
+# Applied once per bimolecular duplex.
+_RNA_INIT_INTERMOLECULAR = (3.61, -1.5)
+# AU end penalty: ΔH = +3.72 kcal/mol, ΔG°37 = +0.45 kcal/mol
+#   → ΔS = (3.72 − 0.45) × 1000 / 310.15 = +10.5 cal/(mol·K)
+# Applied once per terminal A·U base pair.
+_RNA_AU_END = (3.72, 10.5)
+# Symmetry correction for self-complementary RNA duplexes:
+# ΔG°37 = +0.43 kcal/mol, ΔH = 0 → ΔS = −1.4 cal/(mol·K)
 _RNA_SYMMETRY = (0.0, -1.4)
 
 
@@ -108,9 +117,7 @@ def _get_nn_params(rna: bool = False) -> dict[str, tuple[float, float]]:
 def _get_init_params(
     rna: bool = False,
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
-    """Return (init_GC, init_AT, symmetry) parameters."""
-    if rna:
-        return _RNA_INIT_GC, _RNA_INIT_AT, _RNA_SYMMETRY
+    """Return (init_GC, init_AT, symmetry) parameters (DNA model only)."""
     return _DNA_INIT_GC, _DNA_INIT_AT, _DNA_SYMMETRY
 
 
@@ -159,7 +166,6 @@ def calculate_nn_thermodynamics(
         raise ThermodynamicsError(f"Sequence too short for NN calculation: {len(seq)} nt")
 
     nn_params = _get_nn_params(rna)
-    init_gc, init_at, symmetry = _get_init_params(rna)
 
     total_h = 0.0
     total_s = 0.0
@@ -173,29 +179,46 @@ def calculate_nn_thermodynamics(
         total_h += h
         total_s += s
 
-    # Initiation correction: terminal base pair
-    # 5' terminal
-    first_base = seq[0]
-    if first_base in ("G", "C"):
-        total_h += init_gc[0]
-        total_s += init_gc[1]
+    if rna:
+        # Turner 2004 initiation model (NNDB):
+        # intermolecular initiation (once) + AU end penalty (per terminal
+        # A·U base pair) + symmetry correction (self-complementary duplexes)
+        total_h += _RNA_INIT_INTERMOLECULAR[0]
+        total_s += _RNA_INIT_INTERMOLECULAR[1]
+        for terminal_base in (seq[0], seq[-1]):
+            if terminal_base in ("A", "U"):
+                total_h += _RNA_AU_END[0]
+                total_s += _RNA_AU_END[1]
+        if _is_self_complementary(seq, rna=True):
+            total_h += _RNA_SYMMETRY[0]
+            total_s += _RNA_SYMMETRY[1]
     else:
-        total_h += init_at[0]
-        total_s += init_at[1]
+        # SantaLucia 1998 initiation model: per-terminal base pair
+        # corrections (init GC or AT) + symmetry correction
+        init_gc, init_at, symmetry = _get_init_params(rna=False)
 
-    # 3' terminal
-    last_base = seq[-1]
-    if last_base in ("G", "C"):
-        total_h += init_gc[0]
-        total_s += init_gc[1]
-    else:
-        total_h += init_at[0]
-        total_s += init_at[1]
+        # 5' terminal
+        first_base = seq[0]
+        if first_base in ("G", "C"):
+            total_h += init_gc[0]
+            total_s += init_gc[1]
+        else:
+            total_h += init_at[0]
+            total_s += init_at[1]
 
-    # Symmetry correction
-    if _is_self_complementary(seq, rna=rna):
-        total_h += symmetry[0]
-        total_s += symmetry[1]
+        # 3' terminal
+        last_base = seq[-1]
+        if last_base in ("G", "C"):
+            total_h += init_gc[0]
+            total_s += init_gc[1]
+        else:
+            total_h += init_at[0]
+            total_s += init_at[1]
+
+        # Symmetry correction
+        if _is_self_complementary(seq, rna=False):
+            total_h += symmetry[0]
+            total_s += symmetry[1]
 
     return total_h, total_s
 
