@@ -113,11 +113,18 @@ ASODesigner uses the unified nearest-neighbor (NN) model for melting
 temperature (Tm) and free energy (ΔG) predictions:
 
 - **DNA/DNA** — SantaLucia 1998 unified parameters (PNAS 95:1460-1465)
-- **RNA/RNA** — Turner 2004 parameters (Nucleic Acids Res 38:D280-D282)
+- **RNA/RNA** — Turner 2004 parameters (Xia et al. 1998, Biochemistry
+  37:14719-14735, as compiled in the Nearest Neighbor Database,
+  https://rna.urmc.rochester.edu/NNDB/)
 
 The NN model computes thermodynamic properties by summing contributions
 from each dinucleotide step in the duplex, plus initiation and symmetry
-corrections.
+corrections. For RNA, initiation follows the Turner 2004 model:
+intermolecular initiation (ΔH = +3.61 kcal/mol, ΔS = −1.5 cal/(mol·K))
+applied once per duplex, an AU end penalty (ΔH = +3.72 kcal/mol,
+ΔS = +10.5 cal/(mol·K)) applied per terminal A·U base pair, and the
+symmetry correction (ΔS = −1.4 cal/(mol·K)) for self-complementary
+duplexes.
 
 ### Melting temperature (Tm)
 
@@ -224,23 +231,26 @@ Hits are filtered by:
 
 The off-target specificity score is computed as:
 
-$$\text{score} = \frac{1}{1 + \text{weighted\_hits}}$$
+$$\text{score} = \max\left(0,\ \min\left(1,\ 1 - \frac{\text{weighted\_hits}}{\text{max\_hits}}\right)\right)$$
 
-Where `weighted_hits` sums penalties for each off-target hit:
-- Perfect match: weight 1.0
-- Seed match (0 seed mismatches, >0 total): weight 0.5
-- Seed mismatch: weight 0.2
+Where `max_hits` is a normalization constant (default 50, from
+configuration) and `weighted_hits` sums penalties for each off-target
+hit:
+- Perfect match (0 total mismatches): weight 1.0
+- Seed match (0 seed mismatches, >0 total): weight 0.5 × `seed_mismatch_weight` (default 2.0)
+- Seed mismatch (>0 seed mismatches): weight 0.25
 
-A score of 1.0 means no off-target hits (highly specific); 0.0 means
-many perfect-match off-targets.
+A score of 1.0 means no off-target hits (highly specific); scores
+decrease linearly with the weighted off-target load and clamp at 0.0
+when `weighted_hits ≥ max_hits`.
 
 ### Specificity classification
 
 | Class | Score Range |
 |---|---|
 | Specific | ≥ 0.8 |
-| Moderate | 0.5–0.8 |
-| Non-specific | < 0.5 |
+| Moderate | 0.3–0.8 |
+| Non-specific | < 0.3 |
 
 ## Variant/SNP awareness
 
