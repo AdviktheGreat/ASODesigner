@@ -9,7 +9,7 @@ def test_package_imports() -> None:
     """Verify the package can be imported."""
     import aso_designer
 
-    assert aso_designer.__version__ == "0.0.1"
+    assert aso_designer.__version__ == "1.0.0"
 
 
 def test_config_loads() -> None:
