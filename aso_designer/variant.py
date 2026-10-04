@@ -402,17 +402,41 @@ class DbSNPClient:
         return variants
 
 
+def _parse_maf_value(raw: str) -> float:
+    """Parse a MAF / allele-frequency string into a float.
+
+    Handles single values ("0.05") and multi-allelic comma-separated
+    lists ("0.1,0.02"); for lists the maximum frequency is returned
+    (the most common allele is the most conservative for variant-aware
+    design). Returns -1.0 when no numeric value can be parsed.
+    """
+    if raw is None:
+        return -1.0
+    values: list[float] = []
+    for token in str(raw).replace("|", ",").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            values.append(float(token))
+        except ValueError:
+            continue
+    return max(values) if values else -1.0
+
+
 def _parse_maf_from_summary(item: dict) -> float:
-    """Extract MAF from dbSNP ESummary item."""
+    """Extract MAF from dbSNP ESummary item.
+
+    The global_maf field is often formatted as "A/G:0.05". Multi-value
+    frequencies ("A/G:0.05,0.03") resolve to the maximum frequency.
+    """
     global_maf = item.get("global_maf", "")
     if global_maf:
-        try:
-            # MAF is often in format "A/G:0.05"
-            parts = global_maf.split(":")
-            if len(parts) >= 2:
-                return float(parts[-1])
-        except (ValueError, IndexError):
-            pass
+        parts = str(global_maf).split(":")
+        if len(parts) >= 2:
+            maf = _parse_maf_value(parts[-1])
+            if maf >= 0:
+                return maf
     return -1.0
 
 
@@ -924,14 +948,15 @@ def _parse_info_field(info_str: str) -> dict[str, str]:
 def _extract_maf_from_info(info: dict[str, str]) -> float:
     """Extract MAF from VCF INFO field.
 
-    Looks for AF (allele frequency) or MAF keys.
+    Looks for AF (allele frequency), MAF, or GMAF keys. Multi-allelic
+    comma-separated values ("AF=0.1,0.2") resolve to the maximum
+    frequency. Returns -1.0 when no frequency is present or parseable.
     """
     for key in ("AF", "MAF", "GMAF"):
         if key in info:
-            try:
-                return float(info[key])
-            except ValueError:
-                continue
+            maf = _parse_maf_value(info[key])
+            if maf >= 0:
+                return maf
     return -1.0
 
 

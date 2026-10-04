@@ -25,6 +25,7 @@ from aso_designer.variant import (
     _parse_clinvar_position,
     _parse_info_field,
     _parse_maf_from_summary,
+    _parse_maf_value,
     _parse_spdi,
     classify_variant_risk,
     filter_candidates_by_variants,
@@ -186,6 +187,17 @@ class TestHelperFunctions:
         assert _parse_maf_from_summary({"global_maf": "A/G:0.05"}) == 0.05
         assert _parse_maf_from_summary({}) == -1.0
 
+    def test_parse_maf_from_summary_multi_value(self):
+        """Multi-allelic frequency lists resolve to the maximum value."""
+        assert _parse_maf_from_summary({"global_maf": "A/G:0.05,0.03"}) == 0.05
+        assert _parse_maf_from_summary({"global_maf": "A/G:0.02,0.11"}) == 0.11
+
+    def test_parse_maf_from_summary_extra_segments(self):
+        """Extra colon segments fall back to the last parseable value."""
+        assert _parse_maf_from_summary({"global_maf": "A/G:0.05:0.07"}) == 0.07
+        assert _parse_maf_from_summary({"global_maf": "A/G"}) == -1.0
+        assert _parse_maf_from_summary({"global_maf": "A/G:abc"}) == -1.0
+
     def test_normalize_clinical_significance(self):
         assert _normalize_clinical_significance("Pathogenic") == "pathogenic"
         assert _normalize_clinical_significance("Likely pathogenic") == "likely_pathogenic"
@@ -210,6 +222,26 @@ class TestHelperFunctions:
         assert _extract_maf_from_info({"AF": "0.05"}) == 0.05
         assert _extract_maf_from_info({"MAF": "0.1"}) == 0.1
         assert _extract_maf_from_info({}) == -1.0
+
+    def test_extract_maf_from_info_multi_allelic(self):
+        """Comma-separated AF lists (multi-allelic sites) resolve to max."""
+        assert _extract_maf_from_info({"AF": "0.1,0.2"}) == 0.2
+        assert _extract_maf_from_info({"AF": "0.02,0.03,0.4"}) == 0.4
+
+    def test_extract_maf_from_info_unparseable(self):
+        assert _extract_maf_from_info({"AF": "not_a_number"}) == -1.0
+        assert _extract_maf_from_info({"AF": "0.05,,"}) == 0.05
+        assert _extract_maf_from_info({"MAF": ""}) == -1.0
+
+    def test_parse_maf_value(self):
+        """The shared value parser handles common formats."""
+        assert _parse_maf_value("0.05") == 0.05
+        assert _parse_maf_value(" 0.07 ") == 0.07
+        assert _parse_maf_value("0.1,0.02") == 0.1
+        assert _parse_maf_value("0.1|0.02") == 0.1
+        assert _parse_maf_value("") == -1.0
+        assert _parse_maf_value("abc") == -1.0
+        assert _parse_maf_value("0.05,") == 0.05
 
     def test_extract_clinical_from_info(self):
         assert _extract_clinical_from_info({"CLNSIG": "pathogenic"}) == "pathogenic"
