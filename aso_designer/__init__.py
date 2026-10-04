@@ -10,6 +10,6 @@ This is a research/candidate-ranking tool. It does not claim experimental
 efficacy or safety for any candidate produced.
 """
 
-__version__ = "0.0.1"
+__version__ = "1.0.0"
 __author__ = "AdviktheGreat"
 __email__ = "advikanand7@gmail.com"

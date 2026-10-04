@@ -5,7 +5,7 @@ with open("README.md", encoding="utf-8") as f:
 
 setup(
     name="asodesigner",
-    version="0.0.1",
+    version="1.0.0",
     packages=find_packages(),
     package_data={
         "aso_designer": ["config/*.yaml"],
