@@ -315,16 +315,27 @@ class ASOPipeline:
         logger.info("Fetched %s (%d bp)", self.result.transcript_id, self.result.transcript_length)
 
     def _stage_generate(self) -> None:
-        """Generate ASO candidates via sliding window."""
+        """Generate ASO candidates via sliding window.
+
+        Candidates are annotated with transcript regions (5UTR/CDS/3UTR)
+        inferred from ORF detection, and each candidate's features dict
+        is seeded with the transcript length for positional scoring.
+        """
         from aso_designer.candidate_generator import generate_candidates
+        from aso_designer.quality import extract_metadata
 
         if self._transcript is None:
             raise RuntimeError("No transcript available for candidate generation")
 
+        metadata = extract_metadata(self._transcript)
         self._candidates = generate_candidates(
             sequence=self._transcript.sequence,
             config=self.aso_config.candidate,
+            metadata=metadata,
         )
+        transcript_length = len(self._transcript.sequence)
+        for candidate in self._candidates:
+            candidate.features["transcript_length"] = transcript_length
         self.result.total_candidates = len(self._candidates)
         logger.info("Generated %d candidates", self.result.total_candidates)
 
@@ -637,18 +648,43 @@ class ASOPipeline:
         )
 
     def _stage_score(self) -> None:
-        """Score and rank candidates."""
-        from aso_designer.scoring import rank_and_filter, score_candidates_batch
+        """Score and rank candidates using their computed features.
+
+        Each candidate's ``features`` dict — populated by the
+        accessibility, thermodynamics, off-target, and variant stages —
+        is passed to the scoring engine. Missing features (skipped
+        stages) fall back to neutral per-component defaults. The engine
+        is built from the configured scoring weights.
+        """
+        from aso_designer.scoring import (
+            create_score_engine,
+            rank_and_filter,
+            score_candidates_batch,
+        )
 
         if not self._candidates:
             logger.warning("No candidates to score")
             return
 
-        # Build features dicts from candidates that passed filters
+        # Features computed by earlier stages live on each candidate
         passed = [c for c in self._candidates if c.passes_filters]
-        features_list = [{} for _ in passed]
+        features_list = [c.features for c in passed]
 
-        self._scored = score_candidates_batch(passed, features_list)
+        w = self.aso_config.scoring.weights
+        engine = create_score_engine(
+            weights={
+                "accessibility": w.accessibility,
+                "thermodynamics": w.thermodynamics,
+                "gc_content": w.gc_content,
+                "off_target": w.off_target,
+                "variant": w.variant,
+                "self_structure": w.self_structure,
+                "positional": w.positional,
+            },
+            register_all=True,
+        )
+
+        self._scored = score_candidates_batch(passed, features_list, engine=engine)
         self.result.scored_candidates = len(self._scored)
 
         ranking = rank_and_filter(
@@ -668,6 +704,7 @@ class ASOPipeline:
 
     def _stage_report(self) -> None:
         """Generate JSON and HTML reports."""
+        import aso_designer
         from aso_designer.reporting import assemble_report
 
         if not self._scored:
@@ -685,7 +722,7 @@ class ASOPipeline:
             thermodynamic_summaries=self._thermo_summaries or None,
             off_target_results=self._off_target_results or None,
             variant_annotations=self._variant_annotations or None,
-            metadata={"version": "0.0.1", "stages_run": self.result.stages_run},
+            metadata={"version": aso_designer.__version__, "stages_run": self.result.stages_run},
             basename=f"{self.config.target}_report",
             generate_html=self.config.generate_html,
         )

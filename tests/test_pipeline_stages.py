@@ -18,16 +18,17 @@ from aso_designer.viennarna import RNAplfoldResult, ViennaRNAError
 # Fixtures and helpers
 # ---------------------------------------------------------------------------
 
-# 60-nt synthetic transcript with a clean ORF structure:
-#   positions 0-2    ATG (start codon)
-#   positions 3-44   coding sequence (no in-frame stops)
-#   positions 45-47  TAA (stop codon)
-#   positions 48-59  3' UTR
-TRANSCRIPT_SEQ = "ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATTAAGCGCGCGCGCAA"
+# 126-nt synthetic transcript with a clean ORF structure:
+#   positions 0-2     ATG (start codon)
+#   positions 3-98    coding sequence, 32 codons (no in-frame stops)
+#   positions 99-101  TAA (stop codon)
+#   positions 102-125 3' UTR (24 nt, long enough for candidate windows)
+# The CDS is 102 nt = 34 codons, above the 30-codon minimum used by
+# find_orfs/detect_cds.
+TRANSCRIPT_SEQ = "ATG" + "CATGCATGC" * 10 + "CATGCA" + "TAA" + "GCGCGCGCGCAAGCGCGCGCGCAA"
 
-# 60 candidate windows of length 20 -> 41 candidates; all 20-mers in the
-# ATGC-repeat region have 50% GC content and no homopolymers, so most
-# candidates pass the default filters.
+# All 20-mers in the ATGC-repeat region have 50% GC content and no
+# homopolymers, so most candidates pass the default filters.
 
 
 def make_pipeline(sequence: str = TRANSCRIPT_SEQ) -> ASOPipeline:
@@ -263,7 +264,7 @@ class TestOffTargetStage:
             fasta,
             [
                 ("NM_TEST.1 TESTGENE", TRANSCRIPT_SEQ),
-                ("NM_DECOY.1 DECOYGENE", reverse_complement(probe) * 2),
+                ("NM_DECOY.1 DECOYGENE", reverse_complement(probe) * 3),
             ],
         )
         pipeline.config.transcriptome_path = str(fasta)
@@ -294,7 +295,7 @@ class TestOffTargetStage:
             fasta,
             [
                 ("NM_TEST.1 TESTGENE", TRANSCRIPT_SEQ),
-                ("NM_DECOY.1 DECOYGENE", reverse_complement(probe) * 2),
+                ("NM_DECOY.1 DECOYGENE", reverse_complement(probe) * 3),
             ],
         )
         pipeline.config.transcriptome_path = str(fasta)
@@ -450,3 +451,93 @@ class TestVariantStage:
         pipeline._transcript = None
         with pytest.raises(RuntimeError, match="No transcript"):
             pipeline._stage_variant()
+
+
+# ---------------------------------------------------------------------------
+# Score stage: features must flow into scores
+# ---------------------------------------------------------------------------
+
+
+class TestScoreStageIntegration:
+    def test_features_flow_into_scores(self):
+        """Scores computed with real thermodynamic features must differ
+        from scores with neutral defaults."""
+        from aso_designer.scoring import create_score_engine, score_candidates_batch
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_thermodynamics()
+
+        passed = passing_candidates(pipeline)
+        assert passed
+
+        w = pipeline.aso_config.scoring.weights
+        engine = create_score_engine(
+            weights={
+                "accessibility": w.accessibility,
+                "thermodynamics": w.thermodynamics,
+                "gc_content": w.gc_content,
+                "off_target": w.off_target,
+                "variant": w.variant,
+                "self_structure": w.self_structure,
+                "positional": w.positional,
+            },
+            register_all=True,
+        )
+
+        # Score with the computed features
+        scored_real = score_candidates_batch(passed, [c.features for c in passed], engine=engine)
+        # Score with empty features (neutral defaults)
+        scored_neutral = score_candidates_batch(passed, [{} for _ in passed], engine=engine)
+
+        real_thermo = [s.component_scores["thermodynamics"] for s in scored_real]
+        neutral_thermo = [s.component_scores["thermodynamics"] for s in scored_neutral]
+        # Real Tm scores vary across candidates; neutral is always 0.5
+        assert any(t != 0.5 for t in real_thermo)
+        assert all(t == 0.5 for t in neutral_thermo)
+        assert real_thermo != neutral_thermo
+
+    def test_regions_annotated_from_orf_detection(self):
+        """Candidates should be tagged 5UTR/CDS/3UTR, not all 'unknown'."""
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+
+        regions = {c.region for c in pipeline._candidates}
+        assert "unknown" not in regions
+        assert "CDS" in regions
+        assert "3UTR" in regions
+
+    def test_transcript_length_in_features(self):
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+
+        for c in pipeline._candidates:
+            assert c.features["transcript_length"] == len(TRANSCRIPT_SEQ)
+
+    def test_full_stage_sequence_ranks_consistently(self):
+        """thermodynamics → score → verify ranking is descending."""
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_thermodynamics()
+        pipeline._stage_score()
+
+        assert pipeline._scored
+        scores = [s.final_score for s in pipeline._scored]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_report_metadata_carries_package_version(self, tmp_path):
+        import json
+
+        import aso_designer
+
+        pipeline = make_pipeline()
+        pipeline.config.output_dir = str(tmp_path / "results")
+        run_through_filter(pipeline)
+        pipeline._stage_thermodynamics()
+        pipeline._stage_score()
+        pipeline._stage_report()
+
+        report_json = tmp_path / "results" / "TEST_report.json"
+        assert report_json.exists()
+        data = json.loads(report_json.read_text())
+        assert data.get("metadata", {}).get("version") == aso_designer.__version__
