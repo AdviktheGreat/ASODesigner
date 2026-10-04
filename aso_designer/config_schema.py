@@ -114,6 +114,13 @@ class ThermodynamicsConfig(BaseModel):
 class OffTargetConfig(BaseModel):
     """Off-target analysis parameters."""
 
+    transcriptome_path: str | None = Field(
+        default=None,
+        description=(
+            "Path to a transcriptome FASTA file for off-target search. "
+            "If None, off-target analysis is skipped and neutral scores are used."
+        ),
+    )
     max_mismatches: conint(ge=0, le=5) = Field(
         default=3, description="Max mismatches for off-target hits."
     )

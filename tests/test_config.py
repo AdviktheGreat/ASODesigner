@@ -120,6 +120,23 @@ class TestLoadConfig:
 
 
 # ---------------------------------------------------------------------------
+# Data source configuration options
+# ---------------------------------------------------------------------------
+
+
+class TestDataPathOptions:
+    def test_transcriptome_path_default_none(self):
+        config = load_config()
+        assert config.off_target.transcriptome_path is None
+
+    def test_transcriptome_path_override(self, tmp_path):
+        f = tmp_path / "custom.yaml"
+        f.write_text('off_target:\n  transcriptome_path: "/data/transcriptome.fna"\n')
+        config = load_config(str(f))
+        assert config.off_target.transcriptome_path == "/data/transcriptome.fna"
+
+
+# ---------------------------------------------------------------------------
 # _apply_chemistry_preset
 # ---------------------------------------------------------------------------
 

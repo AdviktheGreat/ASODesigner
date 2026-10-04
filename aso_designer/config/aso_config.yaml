@@ -94,6 +94,11 @@ thermodynamics:
 # Off-target analysis
 # ---------------------------------------------------------------------------
 off_target:
+  # Path to a transcriptome FASTA file for off-target search (e.g. a
+  # RefSeq mRNA set for the organism of interest). If omitted, the
+  # off-target stage is skipped and neutral scores are used.
+  # transcriptome_path: /data/refseq_mrna_human.fna
+
   # Maximum mismatches allowed for off-target hits.
   max_mismatches: 3
 
