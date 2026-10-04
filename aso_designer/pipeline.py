@@ -337,8 +337,53 @@ class ASOPipeline:
         )
 
     def _stage_accessibility(self) -> None:
-        """Compute RNA accessibility features."""
-        logger.info("Accessibility stage (placeholder — requires ViennaRNA)")
+        """Compute RNA accessibility features for passing candidates.
+
+        Predicts the accessibility profile of the full target transcript
+        with RNAplfold (via TargetStructurePredictor, with disk caching),
+        then scores each passing candidate's binding site window with
+        ``score_window_accessibility``. The per-candidate score is stored
+        in ``candidate.features["accessibility_score"]``.
+
+        Requires ViennaRNA; raises ViennaRNAError if unavailable. The
+        pipeline treats this stage as non-fatal and continues with
+        neutral accessibility scores.
+        """
+        from aso_designer.accessibility import (
+            TargetStructurePredictor,
+            score_window_accessibility,
+        )
+        from aso_designer.viennarna import verify_viennarna
+
+        if self._transcript is None:
+            raise RuntimeError("No transcript available for accessibility analysis")
+
+        acc_cfg = self.aso_config.accessibility
+        verify_viennarna()
+
+        logger.info(
+            "Predicting accessibility profile (%d nt, window=%d, max_span=%d)",
+            len(self._transcript.sequence),
+            acc_cfg.window_size,
+            acc_cfg.max_pairing_distance,
+        )
+        predictor = TargetStructurePredictor(
+            window_size=acc_cfg.window_size,
+            max_pairing_distance=acc_cfg.max_pairing_distance,
+        )
+        profile = predictor.predict_accessibility(self._transcript.sequence)
+
+        computed = 0
+        for candidate in self._candidates:
+            if not candidate.passes_filters:
+                continue
+            # score_window_accessibility uses 1-based inclusive coordinates;
+            # candidates use 0-based [start, end).
+            score = score_window_accessibility(profile, candidate.start + 1, candidate.end)
+            candidate.features["accessibility_score"] = score
+            computed += 1
+
+        logger.info("Computed accessibility for %d candidates", computed)
 
     def _stage_thermodynamics(self) -> None:
         """Compute thermodynamic features."""
