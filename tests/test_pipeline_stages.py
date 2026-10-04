@@ -331,3 +331,122 @@ class TestOffTargetStage:
         pipeline._transcript = None
         with pytest.raises(RuntimeError, match="No transcript"):
             pipeline._stage_off_target()
+
+
+# ---------------------------------------------------------------------------
+# Variant stage
+# ---------------------------------------------------------------------------
+
+MINIMAL_VCF = (
+    "##fileformat=VCFv4.2\n"
+    '##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n'
+    '##INFO=<ID=CLNSIG,Number=.,Type=String,Description="Clinical significance">\n'
+    "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
+    "chrT\t26\trs1\tC\tT\t.\t.\tAF=0.05;CLNSIG=Benign\n"
+    "chrT\t52\trs2\tA\tG\t.\t.\tAF=0.30;CLNSIG=Pathogenic\n"
+)
+
+
+class TestVariantStage:
+    @staticmethod
+    def _write_vcf(path, content=MINIMAL_VCF):
+        path.write_text(content)
+
+    def test_skips_without_variant_source(self):
+        """No VCF and no gene name -> warn and return, no crash."""
+        pipeline = make_pipeline()
+        pipeline._transcript.gene_name = ""
+        run_through_filter(pipeline)
+        pipeline._stage_variant()
+
+        for c in passing_candidates(pipeline):
+            assert "variant_penalty" not in c.features
+
+    def test_annotates_with_vcf(self, tmp_path):
+        vcf = tmp_path / "variants.vcf"
+        self._write_vcf(vcf)
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline.config.vcf_path = str(vcf)
+        pipeline._stage_variant()
+
+        passed = passing_candidates(pipeline)
+        annotated = [c for c in passed if "variant_penalty" in c.features]
+        assert len(annotated) == len(passed)
+        for c in annotated:
+            assert 0.0 <= c.features["variant_penalty"]
+            assert c.features["variant_risk"] in ("low_risk", "moderate_risk", "high_risk")
+
+    def test_variant_overlap_increases_penalty(self, tmp_path):
+        """Candidates overlapping a variant should carry a higher penalty
+        than candidates in clean regions."""
+        vcf = tmp_path / "variants.vcf"
+        self._write_vcf(vcf)
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline.config.vcf_path = str(vcf)
+        pipeline._stage_variant()
+
+        # Variants at transcript positions 26 and 52 (1-based); a candidate
+        # [start, end) covers 1-based [start+1, end].
+        def overlaps(c, pos):
+            return c.start + 1 <= pos <= c.end
+
+        overlapping = [
+            c.features["variant_penalty"]
+            for c in passing_candidates(pipeline)
+            if overlaps(c, 26) or overlaps(c, 52)
+        ]
+        clean = [
+            c.features["variant_penalty"]
+            for c in passing_candidates(pipeline)
+            if not overlaps(c, 26) and not overlaps(c, 52)
+        ]
+        assert overlapping and clean
+        assert max(overlapping) > 0.0
+        assert all(p == 0.0 for p in clean)
+
+    def test_annotations_collected_for_reporting(self, tmp_path):
+        vcf = tmp_path / "variants.vcf"
+        self._write_vcf(vcf)
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline.config.vcf_path = str(vcf)
+        pipeline._stage_variant()
+
+        assert len(pipeline._variant_annotations) == len(passing_candidates(pipeline))
+
+    def test_maf_below_threshold_ignored(self, tmp_path):
+        """A variant with MAF below the threshold should not be annotated."""
+        vcf_content = MINIMAL_VCF.replace("AF=0.05", "AF=0.001").replace("AF=0.30", "AF=0.001")
+        vcf = tmp_path / "variants.vcf"
+        self._write_vcf(vcf, vcf_content)
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline.config.vcf_path = str(vcf)
+        pipeline._stage_variant()
+
+        # Default maf_threshold=0.01 filters both variants out
+        for c in passing_candidates(pipeline):
+            assert c.features.get("variant_penalty", 0.0) == 0.0
+            assert c.features.get("variant_risk", "") == "low_risk"
+
+    def test_invalid_vcf_skips_gracefully(self, tmp_path):
+        vcf = tmp_path / "bad.vcf"
+        vcf.write_text("not a vcf at all\n")
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline.config.vcf_path = str(vcf)
+        # Should not raise — bad VCF data is a skip condition
+        pipeline._stage_variant()
+
+    def test_no_transcript_raises(self):
+        pipeline = make_pipeline()
+        pipeline._transcript = None
+        with pytest.raises(RuntimeError, match="No transcript"):
+            pipeline._stage_variant()

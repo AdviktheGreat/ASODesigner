@@ -533,8 +533,108 @@ class ASOPipeline:
         logger.info("Scored off-targets for %d candidates", scored)
 
     def _stage_variant(self) -> None:
-        """Run variant/SNP annotation."""
-        logger.info("Variant stage (placeholder — requires variant data)")
+        """Run variant/SNP annotation for passing candidates.
+
+        Variant data comes from ``variant.vcf_path`` (or the pipeline-level
+        ``vcf_path``) when provided; otherwise variants are fetched from
+        the dbSNP/ClinVar APIs using the target's gene name (requires
+        network access). Each passing candidate's binding site is
+        annotated with overlapping variants and the penalty/risk are
+        stored in ``candidate.features``. Annotations are also collected
+        in ``self._variant_annotations`` for reporting.
+
+        Variant positions are interpreted in transcript coordinates —
+        the same coordinate system as the fetched transcript sequence.
+        Genomic-coordinate VCFs require transcript-mapped positions.
+
+        If no variant source is available the stage logs a warning and
+        returns, leaving candidates with neutral variant scores.
+        """
+        from aso_designer.variant import (
+            VariantAnnotator,
+            VariantError,
+            classify_variant_risk,
+        )
+
+        if self._transcript is None:
+            raise RuntimeError("No transcript available for variant annotation")
+
+        var_cfg = self.aso_config.variant
+        ot_cfg = self.aso_config.off_target
+        vcf_path = self.config.vcf_path or var_cfg.vcf_path
+
+        variant_set = None
+        if vcf_path:
+            from aso_designer.variant import load_vcf_filtered
+
+            try:
+                variant_set = load_vcf_filtered(vcf_path, min_maf=var_cfg.maf_threshold)
+            except VariantError as e:
+                logger.warning(
+                    "Could not load VCF %s (%s) — skipping variant analysis",
+                    vcf_path,
+                    e,
+                )
+                return
+        else:
+            gene_name = self._transcript.gene_name
+            if not gene_name:
+                logger.warning(
+                    "No VCF path and no gene name for target — skipping variant analysis"
+                )
+                return
+            from aso_designer.variant import VariantFetchManager
+
+            fetch_cfg = self.aso_config.fetch
+            manager = VariantFetchManager(
+                email=fetch_cfg.email or "",
+                api_key=fetch_cfg.api_key,
+            )
+            try:
+                variant_set = manager.fetch_variants(gene_name, organism=self.config.organism)
+            except VariantError as e:
+                logger.warning(
+                    "Variant fetch failed for %s (%s) — skipping variant analysis",
+                    gene_name,
+                    e,
+                )
+                return
+
+        if variant_set is None:
+            logger.warning("No variant data source available — skipping variant analysis")
+            return
+        if variant_set.num_variants == 0:
+            logger.warning(
+                "No variants passed filtering — annotating candidates with an empty variant set"
+            )
+
+        # The ASO seed region definition is shared with the off-target stage
+        annotator = VariantAnnotator(
+            variant_set,
+            seed_start=ot_cfg.seed_start,
+            seed_end=ot_cfg.seed_end,
+            maf_threshold=var_cfg.maf_threshold,
+            seed_region_multiplier=var_cfg.seed_region_multiplier,
+            flag_pathogenic=var_cfg.flag_pathogenic,
+        )
+
+        annotated = 0
+        for candidate in self._candidates:
+            if not candidate.passes_filters:
+                continue
+            # Transcript coordinates: pass chrom="" so the annotator
+            # matches variant positions directly.
+            annotation = annotator.annotate(candidate.start, candidate.end, chrom="")
+            candidate.features["variant_penalty"] = annotation.penalty
+            candidate.features["variant_risk"] = classify_variant_risk(annotation)
+            self._variant_annotations.append(annotation)
+            annotated += 1
+
+        logger.info(
+            "Annotated %d candidates against %d variants",
+            annotated,
+            variant_set.num_variants,
+        )
 
     def _stage_score(self) -> None:
         """Score and rank candidates."""
