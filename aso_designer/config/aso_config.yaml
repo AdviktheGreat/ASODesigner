@@ -86,6 +86,12 @@ accessibility:
 # Thermodynamics
 # ---------------------------------------------------------------------------
 thermodynamics:
+  # Computation method:
+  #   nearest_neighbor — fast DNA/RNA NN model, no ViennaRNA needed
+  #   rnafold          — ViennaRNA RNAfold for self/target structure
+  #   rnaduplex        — ViennaRNA RNAduplex for the duplex ΔG
+  method: nearest_neighbor
+
   # Melting temperature (Tm) range in degrees Celsius.
   # Candidates outside this range are filtered out.
   tm_min: 40.0

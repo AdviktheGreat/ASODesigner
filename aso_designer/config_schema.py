@@ -112,6 +112,14 @@ class AccessibilityConfig(BaseModel):
 class ThermodynamicsConfig(BaseModel):
     """Thermodynamic feature parameters."""
 
+    method: str = Field(
+        default="nearest_neighbor",
+        description=(
+            "Computation method: 'nearest_neighbor' (fast, no ViennaRNA), "
+            "'rnafold' (ViennaRNA for self/target structure), or "
+            "'rnaduplex' (ViennaRNA RNAduplex for duplex ΔG)."
+        ),
+    )
     tm_min: float = Field(default=40.0, ge=20.0, le=100.0)
     tm_max: float = Field(default=65.0, ge=20.0, le=100.0)
     tm_optimal: float = Field(default=52.0, ge=20.0, le=100.0)
@@ -119,6 +127,14 @@ class ThermodynamicsConfig(BaseModel):
     oligo_conc: float = Field(default=1.0e-6, gt=0.0, description="Oligo concentration (M).")
     self_structure_max: float = Field(default=-3.0, description="Max self-structure ΔG (kcal/mol).")
     binding_min: float = Field(default=-5.0, description="Min net binding ΔG (kcal/mol).")
+
+    @model_validator(mode="after")
+    def validate_method(self) -> "ThermodynamicsConfig":
+        """Validate that the computation method is supported."""
+        valid = {"nearest_neighbor", "rnafold", "rnaduplex"}
+        if self.method not in valid:
+            raise ValueError(f"Invalid method '{self.method}'. Must be one of {valid}.")
+        return self
 
     @model_validator(mode="after")
     def validate_tm_range(self) -> "ThermodynamicsConfig":

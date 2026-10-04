@@ -142,3 +142,87 @@ class TestAccessibilityStage:
         pipeline._transcript = None
         with pytest.raises(RuntimeError, match="No transcript"):
             pipeline._stage_accessibility()
+
+
+# ---------------------------------------------------------------------------
+# Thermodynamics stage
+# ---------------------------------------------------------------------------
+
+
+class TestThermodynamicsStage:
+    def test_thermodynamic_features_written(self):
+        """NN method requires no ViennaRNA; all features should be populated."""
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_thermodynamics()
+
+        passed = passing_candidates(pipeline)
+        assert len(passed) > 0
+        feature_keys = (
+            "tm",
+            "tm_score",
+            "dg_duplex",
+            "dg_self",
+            "dg_target",
+            "dg_net",
+            "binding_class",
+            "self_structure_penalty",
+        )
+        for c in passed:
+            for key in feature_keys:
+                assert key in c.features, f"missing {key} for candidate at {c.start}"
+            assert c.features["tm"] > 0.0
+            assert 0.0 <= c.features["tm_score"] <= 1.0
+            assert c.features["binding_class"] in ("strong", "moderate", "weak")
+            assert 0.0 <= c.features["self_structure_penalty"]
+
+    def test_summaries_collected_for_reporting(self):
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_thermodynamics()
+
+        passed = passing_candidates(pipeline)
+        assert len(pipeline._thermo_summaries) == len(passed)
+
+    def test_filtered_candidates_skipped(self):
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_thermodynamics()
+
+        for c in pipeline._candidates:
+            if not c.passes_filters:
+                assert "tm" not in c.features
+
+    def test_config_parameters_applied(self, tmp_path):
+        """Custom Tm bounds from a user config should flow into the summaries."""
+        config_file = tmp_path / "custom.yaml"
+        config_file.write_text(
+            "thermodynamics:\n  tm_min: 30.0\n  tm_max: 60.0\n  tm_optimal: 45.0\n"
+        )
+        config = PipelineConfig(target="TEST", config_path=str(config_file))
+        pipeline = ASOPipeline(config)
+        pipeline._transcript = TranscriptRecord(
+            accession="NM_TEST.1",
+            sequence=TRANSCRIPT_SEQ,
+            gene_name="TESTGENE",
+            organism="Homo sapiens",
+        )
+        run_through_filter(pipeline)
+        pipeline._stage_thermodynamics()
+
+        assert len(pipeline._thermo_summaries) == len(passing_candidates(pipeline))
+        for summary in pipeline._thermo_summaries:
+            assert 0.0 <= summary.tm_score <= 1.0
+
+    def test_invalid_method_rejected(self, tmp_path):
+        config_file = tmp_path / "bad.yaml"
+        config_file.write_text("thermodynamics:\n  method: bogus\n")
+        pipeline = ASOPipeline(PipelineConfig(target="TEST", config_path=str(config_file)))
+        with pytest.raises(Exception, match="Config validation failed"):
+            _ = pipeline.aso_config
+
+    def test_no_transcript_raises(self):
+        pipeline = make_pipeline()
+        pipeline._transcript = None
+        with pytest.raises(RuntimeError, match="No transcript"):
+            pipeline._stage_thermodynamics()

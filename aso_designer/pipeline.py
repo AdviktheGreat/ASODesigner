@@ -386,8 +386,58 @@ class ASOPipeline:
         logger.info("Computed accessibility for %d candidates", computed)
 
     def _stage_thermodynamics(self) -> None:
-        """Compute thermodynamic features."""
-        logger.info("Thermodynamics stage (placeholder — requires ViennaRNA)")
+        """Compute thermodynamic features for passing candidates.
+
+        Runs ``compute_thermodynamic_summary`` for each passing
+        candidate (Tm, duplex/self/target ΔG, net binding energy,
+        binding classification) and stores the results in
+        ``candidate.features``. Summaries are also collected in
+        ``self._thermo_summaries`` for reporting.
+
+        With the default ``method="nearest_neighbor"`` no external
+        tools are needed; ViennaRNA methods raise (and the pipeline
+        degrades gracefully) when ViennaRNA is unavailable.
+        """
+        from aso_designer.thermodynamics import compute_thermodynamic_summary
+
+        if self._transcript is None:
+            raise RuntimeError("No transcript available for thermodynamic analysis")
+
+        t_cfg = self.aso_config.thermodynamics
+        transcript_seq = self._transcript.sequence
+
+        computed = 0
+        for candidate in self._candidates:
+            if not candidate.passes_filters:
+                continue
+            summary = compute_thermodynamic_summary(
+                candidate.sequence,
+                target_sequence=transcript_seq[candidate.start : candidate.end],
+                chemistry=candidate.chemistry,
+                na_conc=t_cfg.na_conc,
+                oligo_conc=t_cfg.oligo_conc,
+                tm_optimal=t_cfg.tm_optimal,
+                tm_min=t_cfg.tm_min,
+                tm_max=t_cfg.tm_max,
+                self_structure_max=t_cfg.self_structure_max,
+                method=t_cfg.method,
+            )
+            candidate.features.update(
+                {
+                    "tm": summary.tm,
+                    "tm_score": summary.tm_score,
+                    "dg_duplex": summary.dg_duplex,
+                    "dg_self": summary.dg_self,
+                    "dg_target": summary.dg_target,
+                    "dg_net": summary.dg_net,
+                    "binding_class": summary.binding_class,
+                    "self_structure_penalty": summary.self_structure_penalty,
+                }
+            )
+            self._thermo_summaries.append(summary)
+            computed += 1
+
+        logger.info("Computed thermodynamics for %d candidates", computed)
 
     def _stage_off_target(self) -> None:
         """Run off-target analysis."""
