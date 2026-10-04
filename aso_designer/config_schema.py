@@ -144,6 +144,14 @@ class OffTargetConfig(BaseModel):
 class VariantConfig(BaseModel):
     """Variant/SNP awareness parameters."""
 
+    vcf_path: str | None = Field(
+        default=None,
+        description=(
+            "Path to a VCF file with known variants for the target. "
+            "If None, variants are fetched from dbSNP/ClinVar APIs (when a "
+            "gene name is available); if that fails, variant analysis is skipped."
+        ),
+    )
     maf_threshold: confloat(ge=0.0, le=1.0) = Field(
         default=0.01, description="Min MAF to flag a variant."
     )

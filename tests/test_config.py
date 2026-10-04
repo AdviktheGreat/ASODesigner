@@ -135,6 +135,16 @@ class TestDataPathOptions:
         config = load_config(str(f))
         assert config.off_target.transcriptome_path == "/data/transcriptome.fna"
 
+    def test_vcf_path_default_none(self):
+        config = load_config()
+        assert config.variant.vcf_path is None
+
+    def test_vcf_path_override(self, tmp_path):
+        f = tmp_path / "custom.yaml"
+        f.write_text('variant:\n  vcf_path: "/data/variants.vcf"\n')
+        config = load_config(str(f))
+        assert config.variant.vcf_path == "/data/variants.vcf"
+
 
 # ---------------------------------------------------------------------------
 # _apply_chemistry_preset

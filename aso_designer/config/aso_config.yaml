@@ -116,6 +116,12 @@ off_target:
 # Variant / SNP awareness
 # ---------------------------------------------------------------------------
 variant:
+  # Path to a VCF file with known variants for the target. Variant
+  # positions are interpreted in transcript coordinates (the coordinate
+  # system of the fetched transcript sequence). If omitted, variants are
+  # fetched from the dbSNP/ClinVar APIs when a gene name is available.
+  # vcf_path: /data/variants.vcf
+
   # Minimum minor allele frequency (MAF) to flag a variant.
   maf_threshold: 0.01
 
