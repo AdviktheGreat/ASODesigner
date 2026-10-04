@@ -350,6 +350,26 @@ class TestSelfStructure:
         assert r.method == "nearest_neighbor"
         assert r.structure == ""
 
+    def test_nn_fraction_default_03(self):
+        """Default NN fraction scales the perfect-duplex ΔG by 0.3."""
+        dg_duplex = calculate_dg("ATGCATGCATGCATGC", temperature=37.0, rna=False)
+        r = calculate_self_structure_dg_nn("ATGCATGCATGCATGC", chemistry="gapmer")
+        assert r.dg_self == pytest.approx(dg_duplex * 0.3)
+
+    def test_nn_fraction_custom(self):
+        """A custom nn_fraction scales linearly."""
+        seq = "ATGCATGCATGCATGC"
+        r_default = calculate_self_structure_dg_nn(seq, chemistry="gapmer")
+        r_half = calculate_self_structure_dg_nn(seq, chemistry="gapmer", nn_fraction=0.6)
+        assert r_half.dg_self == pytest.approx(r_default.dg_self * 2.0)
+
+    def test_nn_fraction_threaded_through_summary(self):
+        """compute_thermodynamic_summary forwards nn_fraction."""
+        seq = "ATGCATGCATGCATGCATGC"
+        s_default = compute_thermodynamic_summary(seq, nn_fraction=0.3)
+        s_high = compute_thermodynamic_summary(seq, nn_fraction=0.9)
+        assert s_high.dg_self == pytest.approx(s_default.dg_self * 3.0)
+
     def test_convenience_nn(self):
         r = calculate_self_structure_dg("ATGCATGCATGCATGC", chemistry="gapmer")
         assert isinstance(r, SelfStructureResult)

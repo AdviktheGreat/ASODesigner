@@ -108,6 +108,12 @@ thermodynamics:
   # Candidates with ΔG self below this (more negative) are penalized.
   self_structure_max: -3.0
 
+  # Fraction of the perfect-duplex ΔG attributed to intramolecular
+  # self-structure in the nearest-neighbor approximation (0 < x ≤ 1).
+  # Lower values assume less self-structure; 0.3 is a common heuristic.
+  # Only used when method is "nearest_neighbor".
+  self_structure_nn_fraction: 0.3
+
   # Minimum net binding ΔG (kcal/mol). More negative = stronger binding.
   binding_min: -5.0
 

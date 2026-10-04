@@ -157,6 +157,22 @@ class TestDataPathOptions:
         assert config.fetch.email == "user@example.com"
         assert config.fetch.api_key == "abc123"
 
+    def test_self_structure_nn_fraction_default(self):
+        config = load_config()
+        assert config.thermodynamics.self_structure_nn_fraction == 0.3
+
+    def test_self_structure_nn_fraction_override(self, tmp_path):
+        f = tmp_path / "custom.yaml"
+        f.write_text("thermodynamics:\n  self_structure_nn_fraction: 0.5\n")
+        config = load_config(str(f))
+        assert config.thermodynamics.self_structure_nn_fraction == 0.5
+
+    def test_self_structure_nn_fraction_invalid(self, tmp_path):
+        f = tmp_path / "bad.yaml"
+        f.write_text("thermodynamics:\n  self_structure_nn_fraction: 1.5\n")
+        with pytest.raises(ConfigurationError, match="Config validation failed"):
+            load_config(str(f))
+
 
 # ---------------------------------------------------------------------------
 # _apply_chemistry_preset

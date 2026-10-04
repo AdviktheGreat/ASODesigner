@@ -126,6 +126,14 @@ class ThermodynamicsConfig(BaseModel):
     na_conc: float = Field(default=0.1, gt=0.0, description="Sodium concentration (M).")
     oligo_conc: float = Field(default=1.0e-6, gt=0.0, description="Oligo concentration (M).")
     self_structure_max: float = Field(default=-3.0, description="Max self-structure ΔG (kcal/mol).")
+    self_structure_nn_fraction: confloat(gt=0.0, le=1.0) = Field(
+        default=0.3,
+        description=(
+            "Fraction of the perfect-duplex ΔG attributed to intramolecular "
+            "self-structure in the nearest-neighbor approximation "
+            "(used when method is 'nearest_neighbor')."
+        ),
+    )
     binding_min: float = Field(default=-5.0, description="Min net binding ΔG (kcal/mol).")
 
     @model_validator(mode="after")

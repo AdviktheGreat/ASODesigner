@@ -701,6 +701,7 @@ def calculate_self_structure_dg_nn(
     aso_sequence: str,
     chemistry: str = "gapmer",
     temperature: float = 37.0,
+    nn_fraction: float = 0.3,
 ) -> SelfStructureResult:
     """Compute self-structure ΔG using the nearest-neighbor model.
 
@@ -708,6 +709,11 @@ def calculate_self_structure_dg_nn(
     For short ASOs (15-25 nt), self-structure is typically minimal, so
     the NN model provides a quick approximation. For more accurate
     results, use the RNAfold method.
+
+    The NN calculation gives the ΔG of the ASO paired with its perfect
+    complement; since only part of the oligo can fold back on itself,
+    the result is scaled by ``nn_fraction`` (default 0.3). This is a
+    rough approximation; RNAfold is preferred.
 
     Parameters
     ----------
@@ -717,6 +723,9 @@ def calculate_self_structure_dg_nn(
         Chemistry name (determines NN parameter set).
     temperature : float
         Temperature in °C (default 37 °C).
+    nn_fraction : float
+        Fraction of the perfect-duplex ΔG attributed to intramolecular
+        self-structure (default 0.3, in (0, 1]).
 
     Returns
     -------
@@ -725,11 +734,7 @@ def calculate_self_structure_dg_nn(
     """
     use_rna = chemistry in _RNA_CHEMISTRIES
     dg = calculate_dg(aso_sequence, temperature=temperature, rna=use_rna)
-    # For NN self-structure, we use a simple heuristic:
-    # self-structure ΔG is a fraction of the total ΔG, since not all
-    # of the ASO can fold back on itself. We use 0.3 as the fraction.
-    # This is a rough approximation; RNAfold is preferred.
-    dg_self = dg * 0.3
+    dg_self = dg * nn_fraction
     return SelfStructureResult(
         sequence=aso_sequence.upper(),
         dg_self=dg_self,
@@ -803,6 +808,7 @@ def calculate_self_structure_dg(
     method: str = "nearest_neighbor",
     self_structure_max: float = -3.0,
     temperature: float = 37.0,
+    nn_fraction: float = 0.3,
 ) -> SelfStructureResult:
     """Compute self-structure ΔG and penalty with chemistry awareness.
 
@@ -818,6 +824,10 @@ def calculate_self_structure_dg(
         Threshold for maximum penalty (default -3.0 kcal/mol).
     temperature : float
         Temperature for NN calculation (default 37 °C).
+    nn_fraction : float
+        Fraction of the perfect-duplex ΔG attributed to
+        intramolecular self-structure in the NN approximation
+        (default 0.3, in (0, 1]). Ignored for the "rnafold" method.
 
     Returns
     -------
@@ -828,7 +838,10 @@ def calculate_self_structure_dg(
         result = calculate_self_structure_dg_rnafold(aso_sequence)
     elif method == "nearest_neighbor":
         result = calculate_self_structure_dg_nn(
-            aso_sequence, chemistry=chemistry, temperature=temperature
+            aso_sequence,
+            chemistry=chemistry,
+            temperature=temperature,
+            nn_fraction=nn_fraction,
         )
     else:
         raise ThermodynamicsError(
@@ -1083,6 +1096,7 @@ def compute_thermodynamic_summary(
     self_structure_max: float = -3.0,
     method: str = "nearest_neighbor",
     temperature: float = 37.0,
+    nn_fraction: float = 0.3,
 ) -> ThermodynamicSummary:
     """Compute a complete thermodynamic summary for an ASO candidate.
 
@@ -1115,6 +1129,9 @@ def compute_thermodynamic_summary(
         "rnafold"/"rnaduplex" (ViennaRNA, accurate).
     temperature : float
         Temperature for ΔG calculations (default 37 °C).
+    nn_fraction : float
+        Fraction of the perfect-duplex ΔG attributed to intramolecular
+        self-structure in the NN approximation (default 0.3, in (0, 1]).
 
     Returns
     -------
@@ -1147,6 +1164,7 @@ def compute_thermodynamic_summary(
         method=method if method != "rnaduplex" else "rnafold",
         self_structure_max=self_structure_max,
         temperature=temperature,
+        nn_fraction=nn_fraction,
     )
 
     # Target structure ΔG
