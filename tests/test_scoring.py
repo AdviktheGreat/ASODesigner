@@ -292,6 +292,28 @@ class TestThermodynamicsScoreComponent:
         # 0.5 * 0.6 + 0.5 * 0.4 = 0.5 (unknown gets 0.5)
         assert comp.score(ctx) == pytest.approx(0.5)
 
+    def test_custom_tm_weight(self):
+        comp = ThermodynamicsScoreComponent(tm_weight=1.0)
+        ctx = ScoreContext(tm_score=0.7, binding_class="strong")
+        # Tm-only: binding class contributes nothing
+        assert comp.score(ctx) == pytest.approx(0.7)
+
+    def test_custom_binding_class_scores(self):
+        comp = ThermodynamicsScoreComponent(binding_class_scores={"strong": 0.9})
+        ctx = ScoreContext(tm_score=1.0, binding_class="strong")
+        # 1.0 * 0.6 + 0.9 * 0.4 = 0.96
+        assert comp.score(ctx) == pytest.approx(0.96)
+
+    def test_custom_unknown_class_score(self):
+        comp = ThermodynamicsScoreComponent(unknown_class_score=0.2)
+        ctx = ScoreContext(tm_score=0.5, binding_class="bogus")
+        # 0.5 * 0.6 + 0.2 * 0.4 = 0.38
+        assert comp.score(ctx) == pytest.approx(0.38)
+
+    def test_invalid_tm_weight_raises(self):
+        with pytest.raises(ValueError, match="tm_weight"):
+            ThermodynamicsScoreComponent(tm_weight=1.5)
+
 
 # ---------------------------------------------------------------------------
 # GCContentScoreComponent

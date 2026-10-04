@@ -509,13 +509,53 @@ class ThermodynamicsScoreComponent:
     """Scores candidates by thermodynamic profile.
 
     Combines Tm score and binding class into a single score:
-    - Tm score (0–1) weighted by 0.6
-    - Binding class score (strong=1.0, moderate=0.5, weak=0.0) weighted by 0.4
+    - Tm score (0–1) weighted by ``tm_weight`` (default 0.6)
+    - Binding class score weighted by ``1 - tm_weight`` (default 0.4)
 
     If thermodynamics were not computed, returns a neutral 0.5 score.
+
+    Rationale and tunability
+    ------------------------
+    The two sub-signals capture complementary properties: the Tm score
+    measures absolute duplex stability against the configured Tm window,
+    while the binding class reflects net energetics after subtracting
+    self-structure and target-opening costs (see ``classify_binding``).
+    The 0.6/0.4 split and the binding-class score mapping
+    (strong=1.0, moderate=0.5, weak=0.0) are heuristic defaults chosen
+    so that well-designed 18-22 nt gapmers score high but imperfect
+    binders remain distinguishable; they are not constants from a single
+    publication. Both are exposed as constructor parameters for tuning.
+
+    Parameters
+    ----------
+    tm_weight : float
+        Weight for the Tm sub-score in [0, 1]; the binding-class
+        sub-score receives the remainder (default 0.6).
+    binding_class_scores : dict[str, float] or None
+        Maps binding class ("strong", "moderate", "weak") to a sub-score
+        in [0, 1]. Unknown classes receive ``unknown_class_score``
+        (default 0.5). If None, uses the default mapping.
+    unknown_class_score : float
+        Score for an unrecognized binding class (default 0.5).
     """
 
-    _BINDING_CLASS_SCORES = {"strong": 1.0, "moderate": 0.5, "weak": 0.0}
+    _DEFAULT_BINDING_CLASS_SCORES = {"strong": 1.0, "moderate": 0.5, "weak": 0.0}
+
+    def __init__(
+        self,
+        tm_weight: float = 0.6,
+        binding_class_scores: dict[str, float] | None = None,
+        unknown_class_score: float = 0.5,
+    ):
+        if not 0.0 <= tm_weight <= 1.0:
+            raise ValueError(f"tm_weight must be in [0, 1], got {tm_weight}")
+        self.tm_weight = tm_weight
+        self.binding_class_scores = (
+            dict(binding_class_scores)
+            if binding_class_scores is not None
+            else dict(self._DEFAULT_BINDING_CLASS_SCORES)
+        )
+        self.unknown_class_score = unknown_class_score
 
     @property
     def name(self) -> str:
@@ -528,9 +568,11 @@ class ThermodynamicsScoreComponent:
             logger.debug("Thermodynamics not computed; using neutral 0.5")
             return 0.5
 
-        tm_component = context.tm_score * 0.6
-        binding_score = self._BINDING_CLASS_SCORES.get(context.binding_class, 0.5)
-        binding_component = binding_score * 0.4
+        tm_component = context.tm_score * self.tm_weight
+        binding_score = self.binding_class_scores.get(
+            context.binding_class, self.unknown_class_score
+        )
+        binding_component = binding_score * (1.0 - self.tm_weight)
 
         return tm_component + binding_component
 

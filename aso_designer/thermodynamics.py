@@ -1071,6 +1071,17 @@ def classify_binding(
         ΔG at or below this (but above strong_threshold) is "moderate"
         (default -5.0 kcal/mol). Above this is "weak".
 
+    Notes
+    -----
+    The default thresholds are heuristic defaults, not constants from a
+    single publication. They are calibrated so that typical 18-22 nt
+    gapmer designs — whose perfect-duplex ΔG37 values fall roughly in
+    the -20 to -30 kcal/mol range under the SantaLucia (1998) DNA and
+    Xia et al. (1998) RNA parameter sets — classify as "strong" after
+    subtracting self-structure and target-opening costs. Tune both
+    thresholds per chemistry and assay context; they are exposed as
+    parameters precisely because no universal published cutoff exists.
+
     Returns
     -------
     str
