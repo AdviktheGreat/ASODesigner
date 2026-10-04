@@ -70,6 +70,28 @@ class TestFindOrfs:
         orfs = find_orfs(seq, min_length=10)
         assert len(orfs) >= 1
 
+    def test_orf_immediately_after_stop(self):
+        """An ORF starting right after a stop codon in the same frame must
+        not be skipped (regression: the scanner previously advanced one
+        codon too far after recording each ORF)."""
+        # Frame 0: ATG|TAA (ORF at 0-6), then ATG|TAG (ORF at 6-12).
+        # The buggy scanner resumed at codon index 9 (skipping the ATG at
+        # position 6) and only found the first ORF.
+        orfs = find_orfs("ATGTAAATGTAG", min_length=2)
+        assert (0, 6) in orfs
+        assert (6, 12) in orfs
+        assert len(orfs) == 2
+
+    def test_consecutive_orfs_long_sequence(self):
+        """Multiple back-to-back ORFs in one frame are all found."""
+        # ATG + 6 codons + TAA, repeated 3 times in frame 0
+        unit = "ATG" + "GCT" * 6 + "TAA"
+        seq = unit * 3
+        orfs = find_orfs(seq, min_length=2)
+        # Each unit contributes one frame-0 ORF: starts at 0, 33, 66
+        frame0_starts = [s for s, _ in orfs if s % len(unit) == 0]
+        assert len(frame0_starts) == 3
+
 
 # ---------------------------------------------------------------------------
 # detect_cds

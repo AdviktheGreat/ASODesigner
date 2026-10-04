@@ -77,20 +77,25 @@ def find_orfs(sequence: str, min_length: int = 30) -> list[tuple[int, int]]:
         while i < seq_len - 2:
             codon = sequence[i : i + 3]
             if codon in _START_CODONS:
-                # Scan for stop codon
+                # Scan for the first downstream stop codon
                 j = i + 3
+                stop_found = False
                 while j < seq_len - 2:
-                    codon_j = sequence[j : j + 3]
-                    if codon_j in _STOP_CODONS:
-                        orf_len = (j + 3 - i) // 3
-                        if orf_len >= min_length:
-                            orfs.append((i, j + 3))
-                        i = j + 3
+                    if sequence[j : j + 3] in _STOP_CODONS:
+                        stop_found = True
                         break
                     j += 3
-                else:
-                    # No stop found before end of sequence
-                    break
+                if stop_found:
+                    orf_len = (j + 3 - i) // 3
+                    if orf_len >= min_length:
+                        orfs.append((i, j + 3))
+                    # Resume scanning immediately after the stop codon
+                    # (the outer loop must not advance i a second time,
+                    # which previously skipped one codon per ORF)
+                    i = j + 3
+                    continue
+                # No stop codon downstream: no further ORFs in this frame
+                break
             i += 3
 
     return orfs
