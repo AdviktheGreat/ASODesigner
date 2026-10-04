@@ -244,6 +244,7 @@ class ScoreEngine:
 
     @property
     def weights(self) -> dict[str, float]:
+        """Registered component weights."""
         return self._weights
 
     def register_component(self, component: ScoreComponent) -> None:
@@ -493,9 +494,11 @@ class AccessibilityScoreComponent:
 
     @property
     def name(self) -> str:
+        """Return 'accessibility'."""
         return "accessibility"
 
     def score(self, context: ScoreContext) -> float:
+        """Compute accessibility sub-score from pre-computed accessibility_score."""
         if context.accessibility_score < 0:
             logger.debug("Accessibility not computed; using neutral 0.5")
             return 0.5
@@ -516,9 +519,11 @@ class ThermodynamicsScoreComponent:
 
     @property
     def name(self) -> str:
+        """Return 'thermodynamics'."""
         return "thermodynamics"
 
     def score(self, context: ScoreContext) -> float:
+        """Compute thermodynamics sub-score from Tm score and binding class."""
         if context.tm_score < 0:
             logger.debug("Thermodynamics not computed; using neutral 0.5")
             return 0.5
@@ -551,9 +556,11 @@ class GCContentScoreComponent:
 
     @property
     def name(self) -> str:
+        """Return 'gc_content'."""
         return "gc_content"
 
     def score(self, context: ScoreContext) -> float:
+        """Compute GC content sub-score based on optimal range."""
         gc = context.gc_content
 
         if self.gc_min <= gc <= self.gc_max:
@@ -699,9 +706,11 @@ class OffTargetScoreComponent:
 
     @property
     def name(self) -> str:
+        """Return 'off_target'."""
         return "off_target"
 
     def score(self, context: ScoreContext) -> float:
+        """Compute off-target sub-score from pre-computed off_target_score."""
         if context.off_target_score < 0:
             logger.debug("Off-target not computed; using neutral 0.5")
             return 0.5
@@ -719,9 +728,11 @@ class VariantScoreComponent:
 
     @property
     def name(self) -> str:
+        """Return 'variant'."""
         return "variant"
 
     def score(self, context: ScoreContext) -> float:
+        """Compute variant sub-score from variant penalty (1 - penalty)."""
         if not context.variant_risk:
             # No variant data computed; assume no penalty
             return 1.0
@@ -739,9 +750,11 @@ class SelfStructureScoreComponent:
 
     @property
     def name(self) -> str:
+        """Return 'self_structure'."""
         return "self_structure"
 
     def score(self, context: ScoreContext) -> float:
+        """Compute self-structure sub-score from penalty (1 - penalty)."""
         if context.self_structure_penalty == 0.0 and context.dg_self == 0.0:
             # No self-structure data computed; assume no penalty
             return 1.0
@@ -785,9 +798,11 @@ class PositionalScoreComponent:
 
     @property
     def name(self) -> str:
+        """Return 'positional'."""
         return "positional"
 
     def score(self, context: ScoreContext) -> float:
+        """Compute positional sub-score from region weight and center bonus."""
         base = self.region_weights.get(context.region, 0.3)
 
         # Position bonus: candidates near center get a small boost
