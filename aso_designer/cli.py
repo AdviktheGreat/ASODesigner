@@ -131,6 +131,20 @@ def _add_design_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Path to a local FASTA file (bypasses NCBI).",
     )
     parser.add_argument(
+        "--transcriptome",
+        type=str,
+        default=None,
+        help="Path to a transcriptome FASTA for off-target search "
+        "(overrides off_target.transcriptome_path in the config).",
+    )
+    parser.add_argument(
+        "--vcf",
+        type=str,
+        default=None,
+        help="Path to a VCF file with known variants in transcript "
+        "coordinates (overrides variant.vcf_path in the config).",
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         default="results",

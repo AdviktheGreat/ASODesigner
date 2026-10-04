@@ -207,6 +207,45 @@ class TestPipelineConfig:
         assert cfg.run_off_target is False
         assert cfg.run_variant is True
 
+    def test_from_args_data_paths(self):
+        """--transcriptome and --vcf flags map into PipelineConfig."""
+        import argparse
+
+        args = argparse.Namespace(
+            target="BRCA1",
+            chemistry="gapmer",
+            config=None,
+            local_fasta=None,
+            transcriptome="/data/transcriptome.fna",
+            vcf="/data/variants.vcf",
+            output_dir="out",
+            top_n=None,
+            min_score=0.0,
+            no_offtarget=False,
+            no_variant=False,
+            no_html=False,
+        )
+        cfg = PipelineConfig.from_args(args)
+        assert cfg.transcriptome_path == "/data/transcriptome.fna"
+        assert cfg.vcf_path == "/data/variants.vcf"
+
+    def test_design_parser_accepts_transcriptome_and_vcf(self):
+        """The design subparser accepts --transcriptome and --vcf."""
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "design",
+                "--target",
+                "BRCA1",
+                "--transcriptome",
+                "/data/t.fna",
+                "--vcf",
+                "/data/v.vcf",
+            ]
+        )
+        assert args.transcriptome == "/data/t.fna"
+        assert args.vcf == "/data/v.vcf"
+
 
 class TestPipelineResult:
     def test_defaults(self):

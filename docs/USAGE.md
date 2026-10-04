@@ -40,6 +40,12 @@ Common:
   --chemistry CHEM         ASO chemistry: gapmer, mixmer, 2ome, moe, morpholino, full
   --organism ORG           Organism for NCBI lookup (default: Homo sapiens)
   --local-fasta PATH       Local FASTA file (bypasses NCBI)
+  --transcriptome PATH     Transcriptome FASTA for off-target search
+                           (enables off-target analysis; overrides
+                           off_target.transcriptome_path)
+  --vcf PATH               VCF file with known variants in transcript
+                           coordinates (enables variant analysis;
+                           overrides variant.vcf_path)
   --output-dir DIR         Output directory for reports (default: results)
   --top-n N                Keep only the top N candidates
   --min-score SCORE        Minimum score threshold (default: 0.0)
@@ -58,6 +64,12 @@ asodesigner design --target BRCA1 --chemistry gapmer --top-n 20 --output-dir res
 
 # Mixmer design from local FASTA, min score 0.5
 asodesigner design --target NM_007294 --chemistry mixmer --local-fasta transcripts.fasta --min-score 0.5
+
+# Full analysis with off-target search and variant annotation
+asodesigner design --target BRCA1 \
+  --transcriptome refseq_mrna_human.fna \
+  --vcf brca1_variants.vcf \
+  --output-dir results/
 
 # Fast run without off-target or variant analysis
 asodesigner design --target BRCA1 --no-offtarget --no-variant --output-dir results/
