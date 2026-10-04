@@ -30,12 +30,14 @@ class CandidateConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_gc_range(self) -> "CandidateConfig":
+        """Validate that gc_min does not exceed gc_max."""
         if self.gc_min > self.gc_max:
             raise ValueError("gc_min must be <= gc_max")
         return self
 
     @model_validator(mode="after")
     def validate_chemistry(self) -> "CandidateConfig":
+        """Validate that chemistry is a supported type."""
         valid = {"gapmer", "mixmer", "2ome", "moe", "morpholino"}
         if self.chemistry not in valid:
             raise ValueError(f"Invalid chemistry '{self.chemistry}'. Must be one of {valid}.")
@@ -55,6 +57,7 @@ class GapmerConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_wing_chemistry(self) -> "GapmerConfig":
+        """Validate that wing chemistry is 2ome or moe."""
         valid = {"2ome", "moe"}
         if self.wing_chemistry not in valid:
             raise ValueError(
@@ -100,6 +103,7 @@ class ThermodynamicsConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_tm_range(self) -> "ThermodynamicsConfig":
+        """Validate that Tm bounds are consistent and optimal is within range."""
         if self.tm_min > self.tm_max:
             raise ValueError("tm_min must be <= tm_max")
         if not (self.tm_min <= self.tm_optimal <= self.tm_max):
@@ -124,6 +128,7 @@ class OffTargetConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_seed_range(self) -> "OffTargetConfig":
+        """Validate that seed_start is less than seed_end."""
         if self.seed_start >= self.seed_end:
             raise ValueError("seed_start must be < seed_end")
         return self
@@ -156,6 +161,7 @@ class ScoringWeightsConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_weights_sum(self) -> "ScoringWeightsConfig":
+        """Validate that all scoring weights sum to 1.0."""
         total = (
             self.accessibility
             + self.thermodynamics
