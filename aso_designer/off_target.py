@@ -342,6 +342,12 @@ class OffTargetSearchEngine:
 
         if L < k:
             raise OffTargetError(f"ASO length {L} is shorter than k-mer size {k}")
+        if self.seed_end > L or self.seed_start >= L:
+            raise OffTargetError(
+                f"Seed region [{self.seed_start}, {self.seed_end}) does not fit "
+                f"within ASO length {L}. Reduce seed_start/seed_end or use a "
+                "longer ASO."
+            )
 
         # Extract k-mers from the target site and look up in the index
         candidate_positions: set[tuple[int, int]] = set()

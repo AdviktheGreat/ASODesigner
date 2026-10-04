@@ -232,6 +232,13 @@ class TestSearchEngine:
         with pytest.raises(OffTargetError, match="shorter than k-mer"):
             engine.search("ATGC")  # 4 nt < kmer_size 6
 
+    def test_seed_larger_than_aso_error(self, small_reference):
+        """A seed region extending beyond the ASO length must raise,
+        not silently wrap around with negative indices."""
+        engine = OffTargetSearchEngine(small_reference, max_mismatches=3, seed_start=2, seed_end=25)
+        with pytest.raises(OffTargetError, match="does not fit"):
+            engine.search("ATGCATGCATGCATGCATGC")  # 20 nt < seed_end 25
+
     def test_batch_search(self, small_reference):
         engine = OffTargetSearchEngine(small_reference, max_mismatches=3)
         results = engine.search_batch(["ATGCATGCATGCATGCATGC", "TTTTAAAATTTTAAAATTTT"])
