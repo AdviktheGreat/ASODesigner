@@ -106,6 +106,7 @@ class GapmerDesign:
         return pattern
 
     def is_rnase_h_eligible(self) -> bool:
+        """Whether this gapmer chemistry can recruit RNase H (True for gapmers)."""
         return True
 
 
@@ -162,8 +163,7 @@ class MixmerDesign:
         return default_pattern
 
     def is_rnase_h_eligible(self) -> bool:
-        # Mixmers may or may not recruit RNase H depending on gap continuity.
-        # By default, assume not (no contiguous DNA gap).
+        """Whether this mixmer can recruit RNase H (False — no contiguous DNA gap)."""
         return False
 
 
@@ -203,6 +203,7 @@ class FullChemistryDesign:
         return [label] * length
 
     def is_rnase_h_eligible(self) -> bool:
+        """Whether full-modification chemistry can recruit RNase H (False — steric blocking)."""
         return False
 
 

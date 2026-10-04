@@ -43,6 +43,7 @@ class TargetStructure:
 
     @classmethod
     def from_rnafold_result(cls, result: RNAfoldResult) -> TargetStructure:
+        """Build a TargetStructure from an RNAfoldResult."""
         return cls(
             sequence=result.sequence,
             structure=result.structure,
@@ -75,6 +76,7 @@ class AccessibilityProfile:
     def from_rnaplfold_result(
         cls, result: RNAplfoldResult, rna_seq: str, window_size: int
     ) -> AccessibilityProfile:
+        """Build an AccessibilityProfile from an RNAplfoldResult."""
         return cls(
             sequence=rna_seq,
             positions=result.positions,

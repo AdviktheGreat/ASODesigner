@@ -37,6 +37,7 @@ class QualityReport:
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """Serialize quality report to a dictionary."""
         return {
             "accession": self.accession,
             "is_valid": self.is_valid,
@@ -245,6 +246,7 @@ class TranscriptMetadata:
     region_map: list[tuple[int, int, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """Serialize transcript metadata to a dictionary."""
         return {
             "accession": self.accession,
             "gene_name": self.gene_name,
@@ -536,6 +538,7 @@ class BatchQualityReport:
     flagged: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """Serialize batch quality report to a dictionary."""
         return {
             "total_count": self.total_count,
             "valid_count": self.valid_count,

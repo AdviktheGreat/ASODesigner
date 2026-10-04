@@ -50,6 +50,7 @@ class ViennaRNAVersion:
 
     @property
     def version_string(self) -> str:
+        """Formatted version string (e.g. '2.6.4')."""
         return f"{self.major}.{self.minor}.{self.patch}"
 
     def __ge__(self, other: tuple[int, int, int]) -> bool:

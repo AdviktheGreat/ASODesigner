@@ -118,10 +118,12 @@ class VariantSet:
 
     @property
     def variants(self) -> list[Variant]:
+        """List of all variants in the set."""
         return self._variants
 
     @property
     def num_variants(self) -> int:
+        """Number of variants in the set."""
         return len(self._variants)
 
     def add_variant(self, variant: Variant) -> None:

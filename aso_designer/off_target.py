@@ -85,10 +85,12 @@ class TranscriptomeReference:
 
     @property
     def num_transcripts(self) -> int:
+        """Number of transcripts in the reference."""
         return len(self._transcripts)
 
     @property
     def total_length(self) -> int:
+        """Total length of all transcript sequences combined."""
         return self._total_length
 
     def add_transcript(self, entry: TranscriptEntry) -> None:
