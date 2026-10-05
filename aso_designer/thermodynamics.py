@@ -16,10 +16,43 @@ unless otherwise specified.
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from aso_designer.utils.exceptions import ThermodynamicsError
 from aso_designer.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Path to the bundled chemistry presets and its per-process cache.
+_CHEMISTRY_PRESETS_PATH = Path(__file__).parent / "config" / "chemistry_presets.yaml"
+_CHEMISTRY_PRESETS_CACHE: dict | None = None
+
+
+def _load_chemistry_presets() -> dict:
+    """Load the chemistry presets YAML (cached after the first load).
+
+    Returns
+    -------
+    dict
+        Chemistry presets keyed by chemistry name.
+
+    Raises
+    ------
+    OSError, yaml.YAMLError
+        If the bundled presets file is missing, unreadable, or invalid.
+    """
+    global _CHEMISTRY_PRESETS_CACHE
+    if _CHEMISTRY_PRESETS_CACHE is None:
+        with open(_CHEMISTRY_PRESETS_PATH) as f:
+            _CHEMISTRY_PRESETS_CACHE = yaml.safe_load(f) or {}
+    return _CHEMISTRY_PRESETS_CACHE
+
+
+def reset_chemistry_presets_cache() -> None:
+    """Drop the cached chemistry presets (mainly for tests)."""
+    global _CHEMISTRY_PRESETS_CACHE
+    _CHEMISTRY_PRESETS_CACHE = None
+
 
 # Gas constant in cal/(mol·K)
 R = 1.987
@@ -364,14 +397,10 @@ def get_chemistry_tm_adjustment(chemistry: str) -> float:
     float
         Tm adjustment in °C (added to computed Tm).
     """
-    import yaml
-
-    preset_path = Path(__file__).parent / "config" / "chemistry_presets.yaml"
     try:
-        with open(preset_path) as f:
-            presets = yaml.safe_load(f) or {}
-    except Exception:
-        logger.warning("Could not load chemistry presets; using 0.0 adjustment")
+        presets = _load_chemistry_presets()
+    except (OSError, yaml.YAMLError) as e:
+        logger.warning("Could not load chemistry presets; using 0.0 adjustment: %s", e)
         return 0.0
 
     preset = presets.get(chemistry, {})
@@ -789,13 +818,10 @@ def get_chemistry_self_structure_weight(chemistry: str) -> float:
         Weight multiplier (1.0 = default, <1.0 = less sensitive,
         >1.0 = more sensitive).
     """
-    import yaml
-
-    preset_path = Path(__file__).parent / "config" / "chemistry_presets.yaml"
     try:
-        with open(preset_path) as f:
-            presets = yaml.safe_load(f) or {}
-    except Exception:
+        presets = _load_chemistry_presets()
+    except (OSError, yaml.YAMLError) as e:
+        logger.warning("Could not load chemistry presets; using 1.0 weight: %s", e)
         return 1.0
 
     preset = presets.get(chemistry, {})

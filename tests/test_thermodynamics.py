@@ -232,6 +232,35 @@ class TestChemistryTm:
     def test_2ome_adjustment(self):
         assert get_chemistry_tm_adjustment("2ome") == 5.0
 
+    def test_presets_loaded_once_per_process(self):
+        """The presets YAML is parsed once and cached across calls."""
+        import yaml as yaml_mod
+
+        import aso_designer.thermodynamics as thermo_mod
+
+        thermo_mod.reset_chemistry_presets_cache()
+        with patch.object(yaml_mod, "safe_load", wraps=yaml_mod.safe_load) as spy:
+            thermo_mod.get_chemistry_tm_adjustment("gapmer")
+            thermo_mod.get_chemistry_tm_adjustment("2ome")
+            thermo_mod.get_chemistry_self_structure_weight("gapmer")
+            thermo_mod.get_chemistry_self_structure_weight("2ome")
+            assert spy.call_count == 1
+        thermo_mod.reset_chemistry_presets_cache()
+
+    def test_preset_cache_reset_reloads(self):
+        """After a cache reset, the next call re-reads the YAML."""
+        import yaml as yaml_mod
+
+        import aso_designer.thermodynamics as thermo_mod
+
+        thermo_mod.reset_chemistry_presets_cache()
+        with patch.object(yaml_mod, "safe_load", wraps=yaml_mod.safe_load) as spy:
+            thermo_mod.get_chemistry_tm_adjustment("gapmer")
+            thermo_mod.reset_chemistry_presets_cache()
+            thermo_mod.get_chemistry_tm_adjustment("gapmer")
+            assert spy.call_count == 2
+        thermo_mod.reset_chemistry_presets_cache()
+
     def test_moe_adjustment(self):
         assert get_chemistry_tm_adjustment("moe") == 6.0
 
