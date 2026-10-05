@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from aso_designer.config_schema import ASOConfig
 from aso_designer.utils.exceptions import ASODesignError
 from aso_designer.utils.logger import get_logger
 
@@ -216,7 +217,7 @@ class ASOPipeline:
         self._variant_annotations: list = []
 
     @property
-    def aso_config(self):
+    def aso_config(self) -> ASOConfig:
         """Lazily loaded ASOConfig from config system."""
         if self._config is None:
             from aso_designer.config_loader import load_config

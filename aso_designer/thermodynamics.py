@@ -120,11 +120,18 @@ def reset_chemistry_presets_cache() -> None:
     _CHEMISTRY_PRESETS_CACHE = None
 
 
+# Default reaction temperature for Tm/ΔG calculations (°C)
+DEFAULT_TEMPERATURE_C = 37.0
+
+# Default fraction of the perfect-duplex ΔG attributed to intramolecular
+# self-structure in the nearest-neighbor approximation.
+_DEFAULT_NN_FRACTION = 0.3
+
 # Gas constant in cal/(mol·K)
 R = 1.987
 
 # Reference temperature for ΔG calculations (37 °C in Kelvin)
-T_REF = 310.15  # 37 °C
+T_REF = 273.15 + DEFAULT_TEMPERATURE_C
 
 # ---------------------------------------------------------------------------
 # SantaLucia 1998 unified NN parameters for DNA/DNA
@@ -416,7 +423,7 @@ def calculate_tm(
 
 def calculate_dg(
     sequence: str,
-    temperature: float = 37.0,
+    temperature: float = DEFAULT_TEMPERATURE_C,
     rna: bool = False,
 ) -> float:
     """Calculate ΔG at a given temperature using the NN model.
@@ -672,7 +679,7 @@ def calculate_duplex_dg_rnaduplex(
 def calculate_duplex_dg_nn(
     aso_sequence: str,
     chemistry: str = "gapmer",
-    temperature: float = 37.0,
+    temperature: float = DEFAULT_TEMPERATURE_C,
 ) -> DuplexResult:
     """Compute duplex ΔG using the nearest-neighbor model.
 
@@ -709,7 +716,7 @@ def calculate_duplex_dg(
     target_sequence: str | None = None,
     chemistry: str = "gapmer",
     method: str = "nearest_neighbor",
-    temperature: float = 37.0,
+    temperature: float = DEFAULT_TEMPERATURE_C,
 ) -> DuplexResult:
     """Compute duplex ΔG using the specified method.
 
@@ -828,8 +835,8 @@ def calculate_self_structure_dg_rnafold(
 def calculate_self_structure_dg_nn(
     aso_sequence: str,
     chemistry: str = "gapmer",
-    temperature: float = 37.0,
-    nn_fraction: float = 0.3,
+    temperature: float = DEFAULT_TEMPERATURE_C,
+    nn_fraction: float = _DEFAULT_NN_FRACTION,
 ) -> SelfStructureResult:
     """Compute self-structure ΔG using the nearest-neighbor model.
 
@@ -932,8 +939,8 @@ def calculate_self_structure_dg(
     chemistry: str = "gapmer",
     method: str = "nearest_neighbor",
     self_structure_max: float = -3.0,
-    temperature: float = 37.0,
-    nn_fraction: float = 0.3,
+    temperature: float = DEFAULT_TEMPERATURE_C,
+    nn_fraction: float = _DEFAULT_NN_FRACTION,
 ) -> SelfStructureResult:
     """Compute self-structure ΔG and penalty with chemistry awareness.
 
@@ -1058,7 +1065,7 @@ def calculate_target_structure_dg_rnafold(
 
 def calculate_target_structure_dg_nn(
     target_sequence: str,
-    temperature: float = 37.0,
+    temperature: float = DEFAULT_TEMPERATURE_C,
 ) -> TargetStructureResult:
     """Compute target structure ΔG using the NN model.
 
@@ -1088,7 +1095,7 @@ def calculate_target_structure_dg_nn(
 def calculate_target_structure_dg(
     target_sequence: str,
     method: str = "nearest_neighbor",
-    temperature: float = 37.0,
+    temperature: float = DEFAULT_TEMPERATURE_C,
 ) -> TargetStructureResult:
     """Compute target structure ΔG using the specified method.
 
@@ -1243,8 +1250,8 @@ def compute_thermodynamic_summary(
     tm_max: float = 65.0,
     self_structure_max: float = -3.0,
     method: str = "nearest_neighbor",
-    temperature: float = 37.0,
-    nn_fraction: float = 0.3,
+    temperature: float = DEFAULT_TEMPERATURE_C,
+    nn_fraction: float = _DEFAULT_NN_FRACTION,
 ) -> ThermodynamicSummary:
     """Compute a complete thermodynamic summary for an ASO candidate.
 

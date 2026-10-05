@@ -23,6 +23,11 @@ from aso_designer.utils.sequence import reverse_complement, validate_sequence
 
 logger = get_logger(__name__)
 
+# Default thresholds for off-target specificity classification
+# (documented in docs/METHODOLOGY.md).
+_SPECIFIC_THRESHOLD = 0.8
+_MODERATE_THRESHOLD = 0.3
+
 
 # ---------------------------------------------------------------------------
 # Transcriptome reference
@@ -672,8 +677,8 @@ def calculate_off_target_score(
 
 def classify_off_target(
     score: float,
-    specific_threshold: float = 0.8,
-    moderate_threshold: float = 0.3,
+    specific_threshold: float = _SPECIFIC_THRESHOLD,
+    moderate_threshold: float = _MODERATE_THRESHOLD,
 ) -> str:
     """Classify a candidate by off-target specificity.
 

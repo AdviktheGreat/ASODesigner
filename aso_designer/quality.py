@@ -18,6 +18,10 @@ logger = get_logger(__name__)
 _START_CODONS = {"ATG"}
 _STOP_CODONS = {"TAA", "TAG", "TGA"}
 
+# Default minimum ORF length in codons (30 codons = 90 nt) used by
+# find_orfs and CDS detection.
+_DEFAULT_ORF_MIN_CODONS = 30
+
 
 @dataclass
 class QualityReport:
@@ -54,7 +58,7 @@ class QualityReport:
         }
 
 
-def find_orfs(sequence: str, min_length: int = 30) -> list[tuple[int, int]]:
+def find_orfs(sequence: str, min_length: int = _DEFAULT_ORF_MIN_CODONS) -> list[tuple[int, int]]:
     """Find open reading frames in a DNA sequence (all three forward frames).
 
     Parameters
@@ -117,7 +121,7 @@ def detect_cds(sequence: str) -> tuple[int, int] | None:
     tuple[int, int] or None
         (start, end) of the longest ORF, or None if no ORF found.
     """
-    orfs = find_orfs(sequence, min_length=30)
+    orfs = find_orfs(sequence, min_length=_DEFAULT_ORF_MIN_CODONS)
     if not orfs:
         return None
     # Return the longest ORF
@@ -172,7 +176,7 @@ def validate_transcript(
         warnings.append(f"{ambiguous_count} ambiguous bases ({ambiguous_fraction:.1%})")
 
     # CDS detection
-    orfs = find_orfs(seq, min_length=30)
+    orfs = find_orfs(seq, min_length=_DEFAULT_ORF_MIN_CODONS)
     cds = detect_cds(seq)
     has_cds = cds is not None
 

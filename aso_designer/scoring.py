@@ -20,6 +20,10 @@ from aso_designer.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Default weight for candidates whose transcript region is unknown
+# (used both in the default region-weight table and as the .get() fallback).
+_UNKNOWN_REGION_WEIGHT = 0.3
+
 
 # ---------------------------------------------------------------------------
 # Score context: carries all computed features for a candidate
@@ -825,7 +829,7 @@ class PositionalScoreComponent:
             "5UTR": 0.7,
             "3UTR": 0.5,
             "noncoding": 0.6,
-            "unknown": 0.3,
+            "unknown": _UNKNOWN_REGION_WEIGHT,
         }
         self.position_bonus = position_bonus
 
@@ -836,7 +840,7 @@ class PositionalScoreComponent:
 
     def score(self, context: ScoreContext) -> float:
         """Compute positional sub-score from region weight and center bonus."""
-        base = self.region_weights.get(context.region, 0.3)
+        base = self.region_weights.get(context.region, _UNKNOWN_REGION_WEIGHT)
 
         # Position bonus: candidates near center get a small boost
         if context.transcript_length > 0 and context.length > 0:

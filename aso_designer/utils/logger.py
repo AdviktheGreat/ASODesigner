@@ -73,7 +73,7 @@ def setup_logger(
     return logger
 
 
-def get_logger(name: str = "asodesigner") -> logging.Logger:
+def get_logger(name: str = "aso_designer") -> logging.Logger:
     """Return an existing logger or create a default one."""
     logger = logging.getLogger(name)
     if not logger.handlers:
