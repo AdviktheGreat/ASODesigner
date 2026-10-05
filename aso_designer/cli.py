@@ -83,7 +83,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--chemistry",
         type=str,
         default="gapmer",
-        choices=["gapmer", "mixmer", "2ome", "moe", "morpholino", "full"],
+        choices=["gapmer", "mixmer", "2ome", "moe", "morpholino"],
         help="ASO chemistry (default: gapmer).",
     )
     parser.add_argument(

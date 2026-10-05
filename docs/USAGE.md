@@ -37,7 +37,7 @@ Required:
 
 Common:
   --config PATH            YAML config file (overrides defaults)
-  --chemistry CHEM         ASO chemistry: gapmer, mixmer, 2ome, moe, morpholino, full
+  --chemistry CHEM         ASO chemistry: gapmer, mixmer, 2ome, moe, morpholino
   --organism ORG           Organism for NCBI lookup (default: Homo sapiens)
   --local-fasta PATH       Local FASTA file (bypasses NCBI)
   --transcriptome PATH     Transcriptome FASTA for off-target search

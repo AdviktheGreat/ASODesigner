@@ -35,6 +35,13 @@ class TestBuildParser:
     def test_no_command_returns_0(self):
         assert main([]) == 0
 
+    def test_chemistry_full_rejected(self):
+        """'full' is not a valid chemistry (it would raise ConfigurationError
+        downstream); the parser must reject it up front."""
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["design", "--target", "BRCA1", "--chemistry", "full"])
+
     def test_version_flag(self, capsys):
         with pytest.raises(SystemExit) as exc_info:
             main(["--version"])
