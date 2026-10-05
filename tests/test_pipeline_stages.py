@@ -541,3 +541,81 @@ class TestScoreStageIntegration:
         assert report_json.exists()
         data = json.loads(report_json.read_text())
         assert data.get("metadata", {}).get("version") == aso_designer.__version__
+
+
+# ---------------------------------------------------------------------------
+# Pipeline error handling contract
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineErrorContract:
+    @staticmethod
+    def _offline(pipeline: ASOPipeline) -> None:
+        """Bypass fetching (transcript pre-loaded) and network stages."""
+        pipeline._stage_fetch = lambda: None  # type: ignore[method-assign]
+        pipeline.config.run_accessibility = False
+        pipeline.config.run_off_target = False
+        pipeline.config.run_variant = False
+
+    def test_thermodynamics_failure_is_non_fatal(self):
+        """A thermodynamics failure should not abort the pipeline; scoring
+        and reporting continue with neutral features."""
+        from aso_designer.utils.exceptions import ThermodynamicsError
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        self._offline(pipeline)
+
+        def boom():
+            raise ThermodynamicsError("NN table unavailable")
+
+        pipeline._stage_thermodynamics = boom  # type: ignore[method-assign]
+        result = pipeline.run()
+
+        assert any("thermodynamics" in e for e in result.errors)
+        assert "score" in result.stages_run
+        assert "report" in result.stages_run
+        assert result.ranked_candidates > 0
+
+    def test_accessibility_failure_is_non_fatal(self):
+        from aso_designer.utils.exceptions import ViennaRNAError
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        self._offline(pipeline)
+        # Re-enable accessibility: the patched stage replaces the real
+        # ViennaRNA call entirely.
+        pipeline.config.run_accessibility = True
+
+        def boom():
+            raise ViennaRNAError("RNAfold not found")
+
+        pipeline._stage_accessibility = boom  # type: ignore[method-assign]
+        result = pipeline.run()
+
+        assert any("accessibility" in e for e in result.errors)
+        assert result.ranked_candidates > 0
+
+    def test_programming_error_propagates(self):
+        """Bugs (TypeError etc.) must not be swallowed by stage handling."""
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        self._offline(pipeline)
+
+        def buggy():
+            raise TypeError("programming error, not a data problem")
+
+        pipeline._stage_thermodynamics = buggy  # type: ignore[method-assign]
+        with pytest.raises(TypeError, match="programming error"):
+            pipeline.run()
+
+    def test_missing_transcript_aborts(self):
+        """A RuntimeError in a fatal stage stops the pipeline (recorded,
+        not raised) and scoring is skipped."""
+        pipeline = make_pipeline()
+        pipeline._transcript = None
+        self._offline(pipeline)
+        result = pipeline.run()
+
+        assert any("generate" in e for e in result.errors)
+        assert "score" not in result.stages_run

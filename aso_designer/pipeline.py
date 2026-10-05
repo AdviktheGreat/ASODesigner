@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from aso_designer.utils.exceptions import ASODesignError
 from aso_designer.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -230,8 +231,13 @@ class ASOPipeline:
         """Run the full pipeline.
 
         Executes all enabled stages in order, collecting results and
-        errors. Non-fatal errors are logged and recorded but do not
-        stop the pipeline.
+        errors. Expected failures (module errors, missing inputs, I/O
+        problems) are logged and recorded; the four feature stages
+        (accessibility, thermodynamics, off-target, variant) are
+        non-fatal — the pipeline continues and scoring falls back to
+        neutral sub-scores for missing features. Programming errors
+        (TypeError, AttributeError, KeyError, ...) propagate, since
+        they indicate bugs rather than data problems.
 
         Returns
         -------
@@ -263,12 +269,19 @@ class ASOPipeline:
                 logger.info("Running stage: %s", stage_name)
                 stage_fn()
                 self.result.stages_run.append(stage_name)
-            except Exception as e:
+            except (ASODesignError, RuntimeError, OSError, ValueError) as e:
+                # Expected failures: module errors (ViennaRNA/network/config),
+                # missing stage inputs, file I/O problems, and validation
+                # errors. Programming errors (TypeError, AttributeError, ...)
+                # intentionally propagate — they indicate bugs, not data
+                # problems.
                 msg = f"Stage '{stage_name}' failed: {e}"
                 logger.error(msg)
                 self.result.errors.append(msg)
-                # Some stages are non-fatal
-                if stage_name in ("accessibility", "off_target", "variant"):
+                # Feature stages are non-fatal: the pipeline continues and
+                # the scoring engine falls back to neutral sub-scores for
+                # the missing features.
+                if stage_name in ("accessibility", "thermodynamics", "off_target", "variant"):
                     continue
                 break
 
