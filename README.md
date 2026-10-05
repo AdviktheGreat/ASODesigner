@@ -63,8 +63,11 @@ brew install viennarna
 conda install -c bioconda viennarna
 ```
 
-ViennaRNA is optional — the pipeline runs without it but skips accessibility
-and structure-based thermodynamic stages.
+ViennaRNA is optional. The thermodynamics stage defaults to the fast
+nearest-neighbor method, which needs no external tools. When ViennaRNA is
+missing, the accessibility stage and the ViennaRNA-based thermodynamic
+methods degrade gracefully: the pipeline logs a warning and continues with
+neutral scores for the affected features instead of failing.
 
 ## Quick Start
 
@@ -133,7 +136,7 @@ aso_designer/
 ├── quality.py               # Transcript quality and CDS detection
 ├── candidate.py             # ASOCandidate dataclass
 ├── candidate_generator.py   # Sliding-window generation
-├── chemistry.py             # Gapmer/Mixmer/Full chemistry modeling
+├── chemistry.py             # Gapmer/Mixmer/2'-OMe/MOE/morpholino modeling
 ├── filters.py               # Pre-filters (GC, homopolymer, end, ambiguous)
 ├── candidate_serializer.py  # JSON save/load, batch I/O, dedup
 ├── viennarna.py             # ViennaRNA wrappers (RNAfold, RNAplfold, etc.)
@@ -209,7 +212,7 @@ reporting:
 
 Each chemistry has preset adjustments for Tm, self-structure weight, and
 bonuses. Available chemistries: `gapmer`, `mixmer`, `2ome`, `moe`,
-`morpholino`, `full`.
+`morpholino`.
 
 ```bash
 # View presets for a specific chemistry
@@ -255,7 +258,7 @@ pytest --cov=aso_designer
 pytest tests/test_scoring.py -v
 ```
 
-The test suite includes 550+ tests covering all modules, with mocked
+The test suite includes 680+ tests covering all modules, with mocked
 ViennaRNA and NCBI calls for reproducibility.
 
 ## Programmatic Usage

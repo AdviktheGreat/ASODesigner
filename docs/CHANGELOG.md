@@ -2,6 +2,55 @@
 
 All notable changes to ASODesigner are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Removed the invalid `full` chemistry from the CLI choices and docs;
+  it was never supported by the chemistry factory.
+- Corrected the RNA nearest-neighbor parameters to the NNDB/Xia 1998
+  values and rebuilt RNA duplex initiation (intermolecular initiation,
+  terminal AU penalty, symmetry correction).
+- Fixed an off-by-one in ORF detection that skipped one codon per
+  recorded ORF.
+- Multi-allelic dbSNP MAF values (comma/pipe separated lists) now
+  parse correctly, taking the maximum; extra colon segments and
+  unparseable values are handled.
+
+### Changed
+
+- Pipeline stage errors now catch only expected failure classes
+  (ASODesignError, RuntimeError, OSError, ValueError); programming
+  errors propagate. Thermodynamics failures degrade non-fatally like
+  accessibility and off-target.
+- Narrowed broad `except Exception` blocks in candidate generation,
+  accessibility caching, config validation, chemistry presets, and
+  NCBI API clients to the specific exception types they can raise.
+- Scoring components are registered via direct class references
+  instead of importlib lookups.
+- README and API docs updated: real test counts, accurate
+  ViennaRNA-optional description, chemistry list.
+
+### Added
+
+- Real pipeline wiring for accessibility, thermodynamics, off-target,
+  and variant stages; `--transcriptome` and `--vcf` CLI flags;
+  configurable thermodynamics method and NN self-structure fraction.
+- ViennaRNA result disk cache (opt-in via `thermodynamics.cache_dir`),
+  chemistry preset caching, and `lru_cache` memoization of the
+  nearest-neighbor thermodynamic core.
+- K-mer set-based shared-region detection across transcript isoforms
+  (O(L·n) vs the previous O(L²·n·m) scan).
+- Memory-managed batched candidate generation in the pipeline stage.
+- Off-target verification now pre-filters candidates by seed-region
+  mismatches and uses early-terminating Hamming distance.
+
+### Tests
+
+- Grew from 602 to 687 tests, including pipeline error-contract,
+  cache-invalidation, batched-generation equivalence, and NCBI
+  failure-path coverage.
+
 ## [1.0.0] — 2026-10-04
 
 Initial release of ASODesigner. All 52 implementation steps complete

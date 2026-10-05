@@ -56,7 +56,8 @@ cand = ASOCandidate(
 
 ### aso_designer.chemistry
 
-Chemistry modeling for gapmer, mixmer, and full modification designs.
+Chemistry modeling for gapmer, mixmer, 2'-OMe, MOE, and morpholino
+modification designs.
 
 ```python
 from aso_designer.chemistry import create_chemistry_design
