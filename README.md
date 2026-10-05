@@ -258,7 +258,7 @@ pytest --cov=aso_designer
 pytest tests/test_scoring.py -v
 ```
 
-The test suite includes 680+ tests covering all modules, with mocked
+The test suite includes 760+ tests covering all modules, with mocked
 ViennaRNA and NCBI calls for reproducibility.
 
 ## Programmatic Usage

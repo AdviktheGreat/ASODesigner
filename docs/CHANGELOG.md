@@ -47,9 +47,46 @@ All notable changes to ASODesigner are documented in this file.
 
 ### Tests
 
-- Grew from 602 to 687 tests, including pipeline error-contract,
-  cache-invalidation, batched-generation equivalence, and NCBI
-  failure-path coverage.
+- Grew from 602 to 768 tests; overall coverage rose from 86% to 95%
+  (CLI 39% → 93%, variant 78% → 96%, transcript fetching 68% → 96%,
+  fetch manager 100%).
+- In-process CLI handler tests covering all four subcommands
+  (score, report, info, design) including error paths.
+- dbSNP/ClinVar summary-parsing tests with realistic E-utilities
+  payloads; fetch-manager merge/dedup/VCF-fallback tests.
+- Transcript-fetcher cache roundtrip/corruption/expiry tests, batch and
+  ortholog fetch tests; test caches now scoped to temp directories
+  (previously shared /tmp state skipped network paths).
+
+### Changed (code quality)
+
+- Package `__init__` now exposes the stable public API (`ASOPipeline`,
+  `PipelineConfig`, `ASOConfig`, `ASOCandidate`, `load_config`,
+  chemistry helpers, cache controls) via `__all__`.
+- Candidate generation deduplicated into a shared window iterator +
+  candidate builder; the batched generator gains region targeting.
+- The pipeline no longer imports from the CLI: `is_accession` moved to
+  `aso_designer.utils.sequence`; chemistry mid-file imports and
+  variant function-local imports hoisted to module top.
+- dbSNP and ClinVar clients share one E-utilities request/rate-limit
+  base class; NCBI timeout and rate limits are named constants.
+- Chemistry presets path single-sourced in `config_loader`
+  (`CHEMISTRY_PRESETS_PATH` + public `load_chemistry_presets()`); a
+  shared `utils.cache_key.cache_key` replaces three ad-hoc SHA-256
+  copies with a uniform digest length.
+- Scattered magic numbers named (`DEFAULT_TEMPERATURE_C`,
+  `_DEFAULT_NN_FRACTION`, `_DEFAULT_ORF_MIN_CODONS`,
+  `_SPECIFIC_THRESHOLD`/`_MODERATE_THRESHOLD`,
+  `_UNKNOWN_REGION_WEIGHT`); logger default name corrected to
+  `aso_designer`; missing return annotation on `ASOPipeline.aso_config`.
+
+### Fixed
+
+- `load_config(chemistry=...)` now writes the selected chemistry into
+  the validated config (previously only its preset was applied, so the
+  pipeline still generated gapmers under `--chemistry 2ome`).
+- dbSNP rate-limit docstring corrected (0.1 s with API key, 0.34 s
+  without; previously documented as 0.34/0.55).
 
 ## [1.0.0] — 2026-10-04
 
