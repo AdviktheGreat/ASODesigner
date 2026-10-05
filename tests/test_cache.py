@@ -169,3 +169,86 @@ def test_fetch_from_local(sample_fasta_file: Path) -> None:
     fm = FetchManager()
     records = fm.fetch_from_local(sample_fasta_file)
     assert len(records) == 2
+
+
+# ---------------------------------------------------------------------------
+# Corruption and cache-wide utilities
+# ---------------------------------------------------------------------------
+
+
+def test_cache_corrupt_file_returns_none(tmp_cache_dir: Path) -> None:
+    """A corrupted cache file is treated as a miss, not a crash."""
+    cache = TranscriptCacheManager(cache_base=tmp_cache_dir)
+    path = cache._cache_key_path("bad_key", "Homo sapiens")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+    assert cache.retrieve("bad_key", organism="Homo sapiens") is None
+
+
+def test_cache_clear_all_and_total_size(
+    tmp_cache_dir: Path, sample_transcript_record: TranscriptRecord
+) -> None:
+    """clear_all removes every entry; size accounting tracks stored bytes."""
+    cache = TranscriptCacheManager(cache_base=tmp_cache_dir)
+    assert cache.total_size_bytes() == 0
+    cache.store("a", [sample_transcript_record], organism="Homo sapiens")
+    cache.store("b", [sample_transcript_record], organism="Mus musculus")
+    assert cache.total_size_bytes() > 0
+
+    deleted = cache.clear_all()
+    assert deleted == 2
+    assert cache.total_entries() == 0
+    assert cache.total_size_bytes() == 0
+
+
+# ---------------------------------------------------------------------------
+# FetchManager NCBI-success and accession fallback paths
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_manager_ncbi_success_caches(
+    tmp_cache_dir: Path, sample_transcript_record: TranscriptRecord
+) -> None:
+    """A successful NCBI gene fetch is stored in the cache."""
+    fm = FetchManager(cache_dir=tmp_cache_dir)
+    with patch.object(FetchManager, "entrez", new_callable=MagicMock) as mock_entrez:
+        mock_entrez.fetch_gene.return_value = [sample_transcript_record]
+        records = fm.fetch_by_gene("DMD", "Homo sapiens")
+    assert len(records) == 1
+
+    fresh = FetchManager(cache_dir=tmp_cache_dir)
+    assert fresh.cache.retrieve("gene:DMD:Homo sapiens", organism="Homo sapiens")
+
+
+def test_fetch_manager_accession_success_caches(
+    tmp_cache_dir: Path, sample_transcript_record: TranscriptRecord
+) -> None:
+    """A successful NCBI accession fetch is stored in the cache."""
+    fm = FetchManager(cache_dir=tmp_cache_dir)
+    with patch.object(FetchManager, "entrez", new_callable=MagicMock) as mock_entrez:
+        mock_entrez.fetch_by_accession.return_value = sample_transcript_record
+        record = fm.fetch_by_accession("NM_TEST.1", "Homo sapiens")
+    assert record.accession == "NM_TEST.1"
+
+    fresh = FetchManager(cache_dir=tmp_cache_dir)
+    assert fresh.cache.retrieve("acc:NM_TEST.1", organism="Homo sapiens")
+
+
+def test_fetch_manager_accession_fasta_match(tmp_cache_dir: Path, sample_fasta_file: Path) -> None:
+    """When NCBI fails, the accession fallback scans the local FASTA."""
+    fm = FetchManager(cache_dir=tmp_cache_dir, local_fasta=sample_fasta_file)
+    with patch.object(FetchManager, "entrez", new_callable=MagicMock) as mock_entrez:
+        mock_entrez.fetch_by_accession.side_effect = TranscriptFetchError("down")
+        record = fm.fetch_by_accession("NM_FAKE01.1", "Homo sapiens")
+    assert record.accession == "NM_FAKE01.1"
+
+
+def test_fetch_manager_accession_fasta_no_match(
+    tmp_cache_dir: Path, sample_fasta_file: Path
+) -> None:
+    """No FASTA record matching the accession → all sources failed."""
+    fm = FetchManager(cache_dir=tmp_cache_dir, local_fasta=sample_fasta_file)
+    with patch.object(FetchManager, "entrez", new_callable=MagicMock) as mock_entrez:
+        mock_entrez.fetch_by_accession.side_effect = TranscriptFetchError("down")
+        with pytest.raises(TranscriptFetchError, match="All sources failed"):
+            fm.fetch_by_accession("NM_MISSING.9", "Homo sapiens")

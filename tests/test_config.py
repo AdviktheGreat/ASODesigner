@@ -84,8 +84,9 @@ class TestLoadConfig:
 
     def test_with_chemistry(self):
         config = load_config(chemistry="mixmer")
-        # Chemistry param applies presets but doesn't override candidate.chemistry
-        assert config.candidate.chemistry == "gapmer"
+        # The selected chemistry must land in the validated config so the
+        # pipeline generates candidates with the requested chemistry.
+        assert config.candidate.chemistry == "mixmer"
 
     def test_with_user_config(self, tmp_path):
         f = tmp_path / "custom.yaml"

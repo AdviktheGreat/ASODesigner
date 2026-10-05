@@ -15,7 +15,7 @@ DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 def setup_logger(
-    name: str = "asodesigner",
+    name: str = "aso_designer",
     level: int | str = logging.INFO,
     log_file: str | Path | None = None,
     max_bytes: int = 5 * 1024 * 1024,

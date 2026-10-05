@@ -1,5 +1,6 @@
 """Tests for candidate serialization, batch I/O, and deduplication."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -131,3 +132,28 @@ def test_validate_roundtrip(tmp_path: Path) -> None:
     """validate_roundtrip returns True for valid candidates."""
     cands = _make_candidates()
     assert validate_roundtrip(cands, tmp_path / "rt.json")
+
+
+def test_load_candidates_malformed_entry(tmp_path: Path) -> None:
+    """An entry missing required fields raises ValueError with context."""
+    path = tmp_path / "bad.json"
+    path.write_text(
+        json.dumps({"candidates": [{"sequence": "ATGC"}], "metadata": {}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Failed to parse candidate 0"):
+        load_candidates(path)
+
+
+def test_load_candidates_string_candidates_value_raises(tmp_path: Path) -> None:
+    """A non-list candidates value fails parse with a wrapped error."""
+    path = tmp_path / "weird.json"
+    path.write_text(json.dumps({"candidates": "nope", "metadata": {}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="Failed to parse candidate 0"):
+        load_candidates(path)
+
+
+def test_load_batch_missing_dir(tmp_path: Path) -> None:
+    """Loading from a non-existent directory raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError, match="Directory not found"):
+        load_candidates_batch(tmp_path / "missing")

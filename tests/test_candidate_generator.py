@@ -1,5 +1,7 @@
 """Tests for ASO candidate generation, exon mapping, and memory utilities."""
 
+import pytest
+
 from aso_designer.candidate import ASOCandidate
 from aso_designer.candidate_generator import (
     ExonMap,
@@ -150,6 +152,39 @@ def test_should_use_batching() -> None:
     seq = "ATGC" * 5000  # 20000 nt
     cfg = CandidateConfig(length=20, step=1)
     assert should_use_batching(seq, cfg, memory_threshold_mb=0.001)
+
+
+def test_generate_region_too_short_skipped() -> None:
+    """Regions shorter than the ASO length are skipped without error."""
+    cfg = CandidateConfig(length=20, step=5)
+    assert generate_candidates("ATGC" * 10, cfg, regions=[(0, 10)]) == []
+
+
+def test_count_candidates_short_transcript() -> None:
+    """ASO longer than the transcript yields zero candidates."""
+    assert count_candidates("ATGC", CandidateConfig(length=20, step=1)) == 0
+
+
+def test_count_candidates_skips_invalid_regions() -> None:
+    """Out-of-bounds and negative regions contribute nothing to the count."""
+    cfg = CandidateConfig(length=10, step=5)
+    n = count_candidates("ATGC" * 10, cfg, regions=[(-5, -1), (200, 300), (10, 12)])
+    assert n == 0
+
+
+def test_exon_overlap_raises() -> None:
+    """Overlapping exons are rejected at construction."""
+    with pytest.raises(ValueError, match="Overlapping exons"):
+        ExonMap(exons=[(0, 50), (40, 100)])
+
+
+def test_batched_skips_invalid_characters() -> None:
+    """The batched generator drops windows containing invalid characters."""
+    seq = "ATGC" * 5 + "X" * 20 + "ATGC" * 5  # 60 nt with an invalid block
+    cfg = CandidateConfig(length=20, step=10)
+    flattened = [c for batch in generate_candidates_batched(seq, cfg, batch_size=3) for c in batch]
+    assert all("X" not in c.sequence for c in flattened)
+    assert flattened  # clean windows still produced
 
 
 # ---------------------------------------------------------------------------

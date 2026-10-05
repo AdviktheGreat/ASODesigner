@@ -144,6 +144,12 @@ def test_create_chemistry_gapmer() -> None:
     assert isinstance(design, GapmerDesign)
 
 
+def test_create_chemistry_gapmer_default_config() -> None:
+    """Factory falls back to default GapmerConfig when none is provided."""
+    design = create_chemistry_design(CandidateConfig(chemistry="gapmer"))
+    assert isinstance(design, GapmerDesign)
+
+
 def test_create_chemistry_mixmer() -> None:
     """Factory creates MixmerDesign from config."""
     cfg = CandidateConfig(chemistry="mixmer")
@@ -242,3 +248,39 @@ def test_chemistry_summary() -> None:
     assert "gapmer" in summary
     assert "5-10-5" in summary
     assert "RNase H: yes" in summary
+
+
+def test_validate_pattern_no_pattern() -> None:
+    """An unmodified candidate fails pattern validation."""
+    c = ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20)
+    assert validate_pattern(c) is False
+
+
+def test_get_dna_gap_region_no_pattern() -> None:
+    """An unmodified candidate has no DNA gap region."""
+    c = ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20)
+    assert get_dna_gap_region(c) is None
+
+
+def test_get_dna_gap_region_best_at_end() -> None:
+    """The final DNA stretch counts even without a trailing modification."""
+    c = ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20)
+    c.modification_pattern = ["2OMe"] * 5 + ["DNA"] * 3
+    assert get_dna_gap_region(c) == (5, 8)
+
+
+def test_chemistry_summary_no_pattern() -> None:
+    """An unmodified candidate reports that no pattern is set."""
+    c = ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20, chemistry="2ome")
+    assert "no pattern" in chemistry_summary(c)
+
+
+def test_create_chemistry_unknown_raises() -> None:
+    """Chemistries without factory support raise ConfigurationError.
+
+    ``full`` is rejected by the schema and the CLI; model_construct
+    bypasses schema validation to reach the factory's own guard.
+    """
+    cfg = CandidateConfig.model_construct(chemistry="full")
+    with pytest.raises(ConfigurationError, match="Unknown chemistry"):
+        create_chemistry_design(cfg)
