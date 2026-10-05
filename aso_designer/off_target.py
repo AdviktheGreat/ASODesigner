@@ -272,6 +272,24 @@ def _hamming_distance(seq1: str, seq2: str) -> int:
     return sum(a != b for a, b in zip(seq1, seq2, strict=True))
 
 
+def _hamming_distance_bounded(seq1: str, seq2: str, limit: int) -> int:
+    """Compute Hamming distance, aborting once it exceeds ``limit``.
+
+    Returns the true distance when it is at most ``limit``, otherwise
+    ``limit + 1``. This lets full-length verification stop early on the
+    many candidate positions that share only a seed k-mer with the ASO,
+    which is the dominant cost of seed-and-extend searches against a
+    large transcriptome.
+    """
+    mismatches = 0
+    for a, b in zip(seq1, seq2, strict=True):
+        if a != b:
+            mismatches += 1
+            if mismatches > limit:
+                return mismatches
+    return mismatches
+
+
 class OffTargetSearchEngine:
     """Searches a transcriptome reference for ASO off-target binding sites.
 
@@ -360,31 +378,34 @@ class OffTargetSearchEngine:
                     if start >= 0 and start + L <= self.reference.get_transcript(tidx).length:
                         candidate_positions.add((tidx, start))
 
-        # Verify each candidate with full-length Hamming distance
+        # Verify each candidate with full-length Hamming distance.
+        # Candidates are pre-filtered by their seed region (6 nt, nearly
+        # free) before the bounded full-length check: seed mismatches are
+        # a subset of total mismatches, so a candidate whose seed already
+        # exceeds max_mismatches cannot be a hit and is skipped without
+        # paying the full O(L) comparison.
         hits: list[OffTargetHit] = []
-        seen: set[tuple[int, int]] = set()
 
         for tidx, start in candidate_positions:
-            if (tidx, start) in seen:
-                continue
-            seen.add((tidx, start))
-
             transcript = self.reference.get_transcript(tidx)
             aligned = transcript.sequence[start : start + L]
             if len(aligned) < L:
                 continue
 
-            mismatches = _hamming_distance(target_site, aligned)
-            if mismatches > self.max_mismatches:
-                continue
-
-            # Count seed mismatches
-            # Seed in target site: positions [L - seed_end, L - seed_start)
+            # Seed-region prefilter (exact: seed ⊂ alignment).
             seed_start_target = L - self.seed_end
             seed_end_target = L - self.seed_start
-            seed_target = target_site[seed_start_target:seed_end_target]
-            seed_aligned = aligned[seed_start_target:seed_end_target]
-            seed_mismatches = _hamming_distance(seed_target, seed_aligned)
+            seed_mismatches = _hamming_distance(
+                target_site[seed_start_target:seed_end_target],
+                aligned[seed_start_target:seed_end_target],
+            )
+            if seed_mismatches > self.max_mismatches:
+                continue
+
+            # Early-terminating full-length check.
+            mismatches = _hamming_distance_bounded(target_site, aligned, self.max_mismatches)
+            if mismatches > self.max_mismatches:
+                continue
 
             # Determine if this is the on-target hit
             is_on_target = (

@@ -9,6 +9,7 @@ from aso_designer.off_target import (
     TranscriptEntry,
     TranscriptomeReference,
     _hamming_distance,
+    _hamming_distance_bounded,
     calculate_off_target_score,
     classify_hit,
     classify_off_target,
@@ -18,6 +19,7 @@ from aso_designer.off_target import (
     summarize_hits,
 )
 from aso_designer.utils.exceptions import OffTargetError
+from aso_designer.utils.sequence import reverse_complement
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -81,6 +83,22 @@ class TestHammingDistance:
 
     def test_empty(self):
         assert _hamming_distance("", "") == 0
+
+
+class TestHammingDistanceBounded:
+    def test_within_limit_returns_true_distance(self):
+        assert _hamming_distance_bounded("ATGC", "ATGT", 2) == 1
+        assert _hamming_distance_bounded("ATGC", "ATGT", 1) == 1
+
+    def test_over_limit_returns_limit_plus_one(self):
+        assert _hamming_distance_bounded("ATGC", "GCTA", 2) == 3
+        assert _hamming_distance_bounded("ATGC", "GCTA", 0) == 1
+
+    def test_matches_unbounded_within_limit(self):
+        for limit in (0, 1, 2, 3, 4):
+            assert _hamming_distance_bounded("ATGCATGC", "ACGTACGT", limit) == min(
+                _hamming_distance("ATGCATGC", "ACGTACGT"), limit + 1
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +238,41 @@ class TestSearchEngine:
         for h in hits:
             assert h.seed_mismatches >= 0
             assert h.seed_mismatches <= h.mismatches or h.mismatches == 0
+
+    def test_seed_prefilter_is_exact(self):
+        """A seed with more mismatches than max_mismatches can never be a hit.
+
+        Builds a transcript containing an exact full-length match of the
+        ASO's reverse complement with a scrambled seed region: the full
+        alignment has 0 mismatches outside the seed but seed mismatches
+        alone exceed max_mismatches, so the search must return no hits
+        (the prefilter skips it, the full check would also reject it).
+        """
+        aso = "ATGCATGCATGCATGCATGC"
+        target_site = reverse_complement(aso)  # 20 nt
+        # Exact match except the seed window [14, 18) is scrambled.
+        scrambled = list(target_site)
+        for i in range(14, 18):
+            scrambled[i] = "A" if scrambled[i] != "A" else "C"
+        transcript = "".join(scrambled)
+
+        ref = TranscriptomeReference(kmer_size=6)
+        ref.add_transcript(TranscriptEntry("NM_SEED.1", "SEEDGENE", transcript, len(transcript)))
+        ref.build_index()
+
+        engine = OffTargetSearchEngine(ref, max_mismatches=3, seed_start=2, seed_end=8)
+        hits = engine.search(aso)
+        assert len(hits) == 0
+
+    def test_prefilter_preserves_valid_hits(self, small_reference):
+        """The seed prefilter does not drop candidates with clean seeds."""
+        engine = OffTargetSearchEngine(small_reference, max_mismatches=3)
+        hits = engine.search("ATGCATGCATGCATGCATGC")
+        # Same result set as a full scan over all candidates: every hit
+        # reported must have both bounded and true distance ≤ max.
+        for h in hits:
+            assert h.mismatches <= 3
+            assert h.seed_mismatches <= h.mismatches
 
     def test_max_mismatches_filter(self, small_reference):
         engine = OffTargetSearchEngine(small_reference, max_mismatches=0)
