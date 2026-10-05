@@ -1,5 +1,6 @@
 """Tests for variant/SNP awareness (data structures, VCF, annotation, scoring)."""
 
+import json
 import os
 import tempfile
 import urllib.error
@@ -415,7 +416,7 @@ class TestDbSNPClient:
             client.fetch_variants_by_gene("DMD")
 
 
-class TestClinVarClient:
+class TestClinVarSummaryParsing:
     @patch("urllib.request.urlopen")
     def test_fetch_success(self, mock_urlopen):
         mock_resp = MagicMock()
@@ -597,3 +598,198 @@ class TestVariantScoring:
         )
         # (100, 120) has pathogenic variant, should be excluded
         assert len(filtered) == 2
+
+
+# ---------------------------------------------------------------------------
+# NCBI API clients — parsing paths with mocked E-utilities responses
+# ---------------------------------------------------------------------------
+
+
+def _mock_http(payload):
+    """MagicMock for a urlopen context-manager response carrying JSON."""
+    mock = MagicMock()
+    mock.read.return_value = json.dumps(payload).encode()
+    mock.__enter__ = MagicMock(return_value=mock)
+    mock.__exit__ = MagicMock(return_value=False)
+    return mock
+
+
+class TestDbSNPClientParsing:
+    @patch("urllib.request.urlopen")
+    def test_full_flow_parses_summaries(self, mock_urlopen):
+        esearch = _mock_http({"esearchresult": {"idlist": ["123", "456"]}})
+        esummary = _mock_http(
+            {
+                "result": [
+                    {
+                        "uid": "123",
+                        "chrname": "chrX",
+                        "chrpos": "32000000",
+                        "spdi": "NC_000023.11:32000000:A:G",
+                        "global_maf": "A/G:0.05,0.03",
+                        "snp_class": "snv",
+                        "clinical_significance": "Pathogenic",
+                        "gene_name": "DMD",
+                    },
+                    "not-a-dict",  # skipped
+                    {"chrname": "chr1"},  # no uid → skipped
+                    {"uid": "456"},  # no chrom/pos → skipped
+                ]
+            }
+        )
+        mock_urlopen.side_effect = [esearch, esummary]
+
+        client = DbSNPClient(email="t@t.com", api_key="KEY")
+        variants = client.fetch_variants_by_gene("DMD")
+
+        assert len(variants) == 1
+        v = variants[0]
+        assert v.chrom == "chrX"
+        assert v.pos == 32000000
+        assert v.ref == "A"
+        assert v.alt == "G"
+        assert v.rs_id == "rs123"
+        assert v.maf == 0.05  # max of the multi-allelic list
+        assert v.clinical_significance == "Pathogenic"
+        assert v.gene == "DMD"
+
+    @patch("urllib.request.urlopen")
+    def test_no_results_returns_empty(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_http({"esearchresult": {"idlist": []}})
+        assert DbSNPClient(email="t@t.com").fetch_variants_by_gene("QUIETGENE") == []
+
+    @patch("urllib.request.urlopen")
+    def test_credentials_sent(self, mock_urlopen):
+        mock_urlopen.side_effect = [
+            _mock_http({"esearchresult": {"idlist": []}}),
+        ]
+        DbSNPClient(email="me@example.com", api_key="abc123").fetch_variants_by_gene("X")
+        url = mock_urlopen.call_args[0][0].full_url
+        assert "email=me%40example.com" in url
+        assert "api_key=abc123" in url
+
+
+class TestClinVarClient:
+    @patch("urllib.request.urlopen")
+    def test_full_flow_parses_summaries(self, mock_urlopen):
+        esearch = _mock_http({"esearchresult": {"idlist": ["9"]}})
+        esummary = _mock_http(
+            {
+                "result": [
+                    {
+                        "uid": "9",
+                        "chromosome": "chr7",
+                        "location": "117120017-117120018",
+                        "clinical_significance": "Pathogenic/Likely pathogenic",
+                        "variation_type": "snv",
+                        "alleles": "A/G",
+                        "rs_id": "rs123",
+                        "gene_sort": "CFTR",
+                    },
+                    {"uid": "10", "chromosome": "chr7", "location": ""},  # no pos → skipped
+                    42,  # non-dict → skipped
+                ]
+            }
+        )
+        mock_urlopen.side_effect = [esearch, esummary]
+
+        client = ClinVarClient(email="t@t.com")
+        variants = client.fetch_pathogenic_variants("CFTR")
+
+        assert len(variants) == 1
+        v = variants[0]
+        assert v.chrom == "chr7"
+        assert v.pos == 117120017
+        assert v.ref == "A"
+        assert v.alt == "G"
+        assert v.rs_id == "rs123"
+        assert v.maf == -1.0  # ClinVar provides no MAF
+        assert v.clinical_significance == "likely_pathogenic"
+        assert v.gene == "CFTR"
+
+    @patch("urllib.request.urlopen")
+    def test_no_results_returns_empty(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_http({"esearchresult": {"idlist": []}})
+        assert ClinVarClient(email="t@t.com").fetch_pathogenic_variants("QUIET") == []
+
+
+class TestClinicalSignificanceNormalization:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("Pathogenic/Likely pathogenic", "likely_pathogenic"),
+            ("Pathogenic", "pathogenic"),
+            ("Likely benign", "likely_benign"),
+            ("Benign", "benign"),
+            ("Uncertain significance", "uncertain"),
+            ("Conflicting interpretations", "conflicting interpretations"),
+        ],
+    )
+    def test_normalization(self, raw, expected):
+        assert _normalize_clinical_significance(raw) == expected
+
+
+class TestClinvarParsingHelpers:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [("12345", 12345), ("12345-12350", 12345), ("", 0), ("abc", 0)],
+    )
+    def test_parse_position(self, raw, expected):
+        assert _parse_clinvar_position(raw) == expected
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [("A/G", ("A", "G")), ("AT/-", ("AT", "-")), ("", ("", "")), ("AG", ("", ""))],
+    )
+    def test_parse_alleles(self, raw, expected):
+        assert _parse_clinvar_alleles(raw) == expected
+
+
+class TestVariantFetchManagerMerging:
+    def test_merges_api_sources(self):
+        manager = VariantFetchManager(email="t@t.com")
+        v1 = Variant(chrom="1", pos=100, ref="A", alt="G", rs_id="rs1")
+        v2 = Variant(chrom="1", pos=200, ref="C", alt="T", rs_id="rs2")
+        with patch.object(manager.dbsnp, "fetch_variants_by_gene", return_value=[v1]):
+            with patch.object(manager.clinvar, "fetch_pathogenic_variants", return_value=[v2]):
+                result = manager.fetch_variants("GENE")
+        assert result.num_variants == 2
+
+    def test_deduplicates_across_sources(self):
+        manager = VariantFetchManager(email="t@t.com")
+        v1 = Variant(chrom="1", pos=100, ref="A", alt="G", rs_id="rs1", maf=0.1)
+        v2 = Variant(chrom="1", pos=100, ref="A", alt="G", rs_id="rs1", maf=0.2)
+        with patch.object(manager.dbsnp, "fetch_variants_by_gene", return_value=[v1]):
+            with patch.object(manager.clinvar, "fetch_pathogenic_variants", return_value=[v2]):
+                result = manager.fetch_variants("GENE")
+        assert result.num_variants == 1
+
+    def test_api_failure_degrades_to_vcf(self, tmp_path):
+        """When both APIs fail, the VCF fallback still supplies variants."""
+        vcf_path = tmp_path / "vars.vcf"
+        vcf_path.write_text(
+            "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
+            "1\t500\trs500\tA\tG\t.\tPASS\tMAF=0.2\n"
+        )
+        manager = VariantFetchManager(email="t@t.com", vcf_path=str(vcf_path))
+        with patch.object(
+            manager.dbsnp,
+            "fetch_variants_by_gene",
+            side_effect=VariantError("down"),
+        ):
+            with patch.object(
+                manager.clinvar,
+                "fetch_pathogenic_variants",
+                side_effect=VariantError("down"),
+            ):
+                result = manager.fetch_variants("GENE")
+        assert result.num_variants == 1
+
+    def test_clinvar_disabled(self):
+        manager = VariantFetchManager(email="t@t.com")
+        v1 = Variant(chrom="1", pos=100, ref="A", alt="G", rs_id="rs1")
+        with patch.object(manager.dbsnp, "fetch_variants_by_gene", return_value=[v1]):
+            with patch.object(manager.clinvar, "fetch_pathogenic_variants") as clinvar_mock:
+                result = manager.fetch_variants("GENE", use_clinvar=False)
+        assert result.num_variants == 1
+        clinvar_mock.assert_not_called()
