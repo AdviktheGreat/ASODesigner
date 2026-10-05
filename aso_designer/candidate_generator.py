@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from aso_designer.candidate import ASOCandidate
 from aso_designer.config_schema import CandidateConfig
 from aso_designer.quality import TranscriptMetadata, classify_position
+from aso_designer.utils.exceptions import InvalidSequenceError
 from aso_designer.utils.logger import get_logger
 from aso_designer.utils.sequence import gc_content, validate_sequence
 
@@ -96,7 +97,7 @@ def generate_candidates(
             # Skip sequences with invalid characters
             try:
                 subseq = validate_sequence(subseq, allow_rna=False, allow_iupac=False)
-            except Exception:
+            except InvalidSequenceError:
                 logger.debug("Skipping candidate at %d: invalid characters", abs_start)
                 continue
 
@@ -176,7 +177,7 @@ def generate_candidates_batched(
 
         try:
             subseq = validate_sequence(subseq, allow_rna=False, allow_iupac=False)
-        except Exception:
+        except InvalidSequenceError:
             continue
 
         gc = gc_content(subseq)
