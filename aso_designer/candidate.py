@@ -8,6 +8,8 @@ with sequence + MFE; we track chemistry modifications, region
 annotation, a feature vector, and a score vector.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -82,7 +84,7 @@ class ASOCandidate:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ASOCandidate":
+    def from_dict(cls, data: dict[str, Any]) -> ASOCandidate:
         """Deserialize from a dictionary."""
         return cls(
             sequence=data["sequence"],
