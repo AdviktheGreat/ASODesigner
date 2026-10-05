@@ -333,22 +333,28 @@ class ASOPipeline:
         Candidates are annotated with transcript regions (5UTR/CDS/3UTR)
         inferred from ORF detection, and each candidate's features dict
         is seeded with the transcript length for positional scoring.
+
+        Uses the memory-managed batched generator so very long
+        transcripts (e.g. DMD at ~14 kb) do not require the full
+        candidate list to be materialized at once during generation.
         """
-        from aso_designer.candidate_generator import generate_candidates
+        from aso_designer.candidate_generator import generate_candidates_batched
         from aso_designer.quality import extract_metadata
 
         if self._transcript is None:
             raise RuntimeError("No transcript available for candidate generation")
 
         metadata = extract_metadata(self._transcript)
-        self._candidates = generate_candidates(
+        transcript_length = len(self._transcript.sequence)
+        self._candidates = []
+        for batch in generate_candidates_batched(
             sequence=self._transcript.sequence,
             config=self.aso_config.candidate,
             metadata=metadata,
-        )
-        transcript_length = len(self._transcript.sequence)
-        for candidate in self._candidates:
-            candidate.features["transcript_length"] = transcript_length
+        ):
+            for candidate in batch:
+                candidate.features["transcript_length"] = transcript_length
+            self._candidates.extend(batch)
         self.result.total_candidates = len(self._candidates)
         logger.info("Generated %d candidates", self.result.total_candidates)
 

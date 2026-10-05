@@ -67,6 +67,55 @@ def mock_rnaplfold_result() -> RNAplfoldResult:
 
 
 # ---------------------------------------------------------------------------
+# Generation stage
+# ---------------------------------------------------------------------------
+
+
+class TestStageGenerate:
+    def test_generate_matches_direct_generation(self):
+        """Batched pipeline generation equals direct generate_candidates."""
+        from aso_designer.candidate_generator import generate_candidates
+        from aso_designer.quality import extract_metadata
+
+        pipeline = make_pipeline()
+        direct = generate_candidates(
+            sequence=pipeline._transcript.sequence,
+            config=pipeline.aso_config.candidate,
+            metadata=extract_metadata(pipeline._transcript),
+        )
+
+        pipeline._stage_generate()
+        assert pipeline.result.total_candidates == len(direct)
+        for got, want in zip(pipeline._candidates, direct, strict=True):
+            assert got.sequence == want.sequence
+            assert got.start == want.start
+            assert got.end == want.end
+            assert got.region == want.region
+            assert got.features["transcript_length"] == len(pipeline._transcript.sequence)
+
+    def test_batched_generation_equals_direct(self):
+        """Flattened batches equal the one-shot generator, any batch size."""
+        from aso_designer.candidate_generator import (
+            CandidateConfig,
+            generate_candidates,
+            generate_candidates_batched,
+        )
+
+        seq = TRANSCRIPT_SEQ
+        cfg = CandidateConfig(length=16, step=3)
+        direct = generate_candidates(seq, cfg)
+        for batch_size in (1, 5, 10000):
+            flattened = [
+                c
+                for batch in generate_candidates_batched(seq, cfg, batch_size=batch_size)
+                for c in batch
+            ]
+            assert [(c.sequence, c.start, c.end, c.region) for c in flattened] == [
+                (c.sequence, c.start, c.end, c.region) for c in direct
+            ]
+
+
+# ---------------------------------------------------------------------------
 # Accessibility stage
 # ---------------------------------------------------------------------------
 
