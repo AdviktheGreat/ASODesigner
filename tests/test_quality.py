@@ -1,5 +1,7 @@
 """Tests for the quality module: ORF detection, validation, metadata, and batch reports."""
 
+import random
+
 from aso_designer.quality import (
     TranscriptSet,
     classify_position,
@@ -292,6 +294,47 @@ class TestTranscriptSet:
         ts.add_transcript(_make_record("ATGCATGC" * 40, "NM_002"))
         shared = ts.shared_regions(min_overlap=20)
         assert len(shared) >= 1
+
+    def test_shared_regions_matches_bruteforce(self):
+        """The k-mer-set implementation is equivalent to direct scanning."""
+        rng = random.Random(20240601)
+        common = "".join(rng.choice("ACGT") for _ in range(60))
+        ref = (
+            "".join(rng.choice("ACGT") for _ in range(30))
+            + common
+            + "".join(rng.choice("ACGT") for _ in range(30))
+        )
+        iso1 = "".join(rng.choice("ACGT") for _ in range(25)) + common
+        iso2 = common + "".join(rng.choice("ACGT") for _ in range(25))
+
+        ts = TranscriptSet(gene_name="X", organism="H")
+        ts.add_transcript(_make_record(ref, "NM_001"))
+        ts.add_transcript(_make_record(iso1, "NM_002"))
+        ts.add_transcript(_make_record(iso2, "NM_003"))
+
+        window = 12
+        longest = ts.longest_transcript()
+        assert longest is not None
+
+        # Brute-force reference: window shared iff present in every isoform.
+        others = [t.sequence for t in ts.transcripts if t is not longest]
+        expected: list[tuple[int, int]] = []
+        for i in range(len(longest.sequence) - window + 1):
+            kmer = longest.sequence[i : i + window]
+            if all(kmer in seq for seq in others):
+                if expected and expected[-1][1] == i:
+                    expected[-1] = (expected[-1][0], i + window)
+                else:
+                    expected.append((i, i + window))
+
+        assert ts.shared_regions(min_overlap=window) == expected
+
+    def test_shared_regions_transcript_shorter_than_window(self):
+        """Isoforms too short to contain one window yield no shared regions."""
+        ts = TranscriptSet(gene_name="X", organism="H")
+        ts.add_transcript(_make_record("ATGC" * 50, "NM_001"))
+        ts.add_transcript(_make_record("ATGC", "NM_002"))
+        assert ts.shared_regions(min_overlap=20) == []
 
 
 # ---------------------------------------------------------------------------

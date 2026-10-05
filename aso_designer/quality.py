@@ -472,21 +472,23 @@ class TranscriptSet:
             return []
 
         ref_seq = longest.sequence
-        shared: list[tuple[int, int]] = []
-
-        # Find common subsequences by checking each transcript
-        # against the longest one using a sliding window
         window = min_overlap
+        longest_idx = next(i for i, t in enumerate(self.transcripts) if t is longest)
+        other_seqs = [t.sequence for i, t in enumerate(self.transcripts) if i != longest_idx]
+
+        # Precompute the set of all min_overlap-mers for each other
+        # transcript: per-window membership checks become O(1) hash
+        # lookups instead of O(L·m) substring scans, dropping overall
+        # cost from O(L²·n·m) to O(L·n) after an O(L·n) preprocessing
+        # pass.
+        kmer_sets = [
+            {seq[j : j + window] for j in range(len(seq) - window + 1)} for seq in other_seqs
+        ]
+
+        shared: list[tuple[int, int]] = []
         for i in range(0, len(ref_seq) - window + 1):
             kmer = ref_seq[i : i + window]
-            in_all = True
-            for other in self.transcripts:
-                if other is longest:
-                    continue
-                if kmer not in other.sequence:
-                    in_all = False
-                    break
-            if in_all:
+            if all(kmer in ks for ks in kmer_sets):
                 # Extend the shared region
                 if shared and shared[-1][1] == i:
                     shared[-1] = (shared[-1][0], i + window)
