@@ -666,3 +666,178 @@ class TestEndToEnd:
         assert r3.returncode == 0
         assert os.path.exists(os.path.join(report_dir, "final_e2e.json"))
         assert os.path.exists(os.path.join(report_dir, "final_e2e.html"))
+
+
+# ---------------------------------------------------------------------------
+# In-process handler tests (coverage-visible counterparts of the
+# subprocess tests above)
+# ---------------------------------------------------------------------------
+
+
+class TestCliHandlersInProcess:
+    def test_design_success(self, tmp_path, capsys):
+        fasta_path = _write_test_fasta(str(tmp_path / "t.fasta"), seq_id="NM_INPROC_1")
+        output_dir = str(tmp_path / "out")
+        rc = main(
+            [
+                "design",
+                "--target",
+                "NM_INPROC_1",
+                "--local-fasta",
+                fasta_path,
+                "--output-dir",
+                output_dir,
+                "--top-n",
+                "3",
+                "--no-offtarget",
+                "--no-variant",
+                "--quiet",
+            ]
+        )
+        assert rc == 0
+        assert os.path.exists(os.path.join(output_dir, "NM_INPROC_1_report.json"))
+        assert "Pipeline completed successfully" in capsys.readouterr().out
+
+    def test_design_invalid_target(self, capsys):
+        assert main(["design", "--target", "BAD; rm -rf /", "--quiet"]) == 1
+        assert "Invalid target" in capsys.readouterr().err
+
+    def test_design_missing_fasta(self, capsys):
+        rc = main(["design", "--target", "BRCA1", "--local-fasta", "/no/such.fasta", "--quiet"])
+        assert rc == 1
+        assert "not found" in capsys.readouterr().err.lower()
+
+    def _write_candidates(self, path):
+        cands = [
+            ASOCandidate("ATGCATGCATGCATGCATGC", 0, 20, 20, gc_content=0.5, region="CDS"),
+            ASOCandidate("GCGCGCGCGCGCGCGCGCGC", 20, 40, 20, gc_content=1.0, region="3UTR"),
+        ]
+        save_candidates(cands, path)
+
+    def test_score_to_stdout(self, tmp_path, capsys):
+        cand_path = str(tmp_path / "cands.json")
+        self._write_candidates(cand_path)
+        rc = main(["score", "--candidates", cand_path, "--top-n", "2", "--quiet"])
+        assert rc == 0
+        assert "ranked_candidates" in capsys.readouterr().out
+
+    def test_score_to_file(self, tmp_path, capsys):
+        cand_path = str(tmp_path / "cands.json")
+        self._write_candidates(cand_path)
+        output_path = str(tmp_path / "out" / "scored.json")
+        rc = main(["score", "--candidates", cand_path, "--output", output_path, "--quiet"])
+        assert rc == 0
+        assert os.path.exists(output_path)
+        assert "saved to" in capsys.readouterr().out
+
+    def test_score_missing_file(self, capsys):
+        rc = main(["score", "--candidates", "/nonexistent/file.json", "--quiet"])
+        assert rc == 1
+        assert "not found" in capsys.readouterr().err.lower()
+
+    def test_score_empty_candidates(self, tmp_path, capsys):
+        cand_path = str(tmp_path / "empty.json")
+        save_candidates([], cand_path)
+        rc = main(["score", "--candidates", cand_path, "--quiet"])
+        assert rc == 1
+        assert "No candidates found" in capsys.readouterr().err
+
+    def test_report_from_design_output(self, tmp_path, capsys):
+        """Chain: design → report subcommand regenerates reports."""
+        fasta_path = _write_test_fasta(str(tmp_path / "t.fasta"), seq_id="NM_INPROC_2")
+        design_dir = str(tmp_path / "design")
+        main(
+            [
+                "design",
+                "--target",
+                "NM_INPROC_2",
+                "--local-fasta",
+                fasta_path,
+                "--output-dir",
+                design_dir,
+                "--no-offtarget",
+                "--no-variant",
+                "--quiet",
+            ]
+        )
+        design_json = os.path.join(design_dir, "NM_INPROC_2_report.json")
+        assert os.path.exists(design_json)
+
+        report_dir = str(tmp_path / "reports")
+        rc = main(
+            [
+                "report",
+                "--results",
+                design_json,
+                "--output-dir",
+                report_dir,
+                "--basename",
+                "inproc",
+                "--quiet",
+            ]
+        )
+        assert rc == 0
+        assert os.path.exists(os.path.join(report_dir, "inproc.json"))
+        assert os.path.exists(os.path.join(report_dir, "inproc.html"))
+        assert "Report generation complete" in capsys.readouterr().out
+
+    def test_report_missing_file(self, capsys):
+        rc = main(["report", "--results", "/nonexistent/results.json", "--quiet"])
+        assert rc == 1
+        assert "not found" in capsys.readouterr().err.lower()
+
+    def test_report_no_html(self, tmp_path, capsys):
+        fasta_path = _write_test_fasta(str(tmp_path / "t.fasta"), seq_id="NM_INPROC_3")
+        design_dir = str(tmp_path / "design")
+        main(
+            [
+                "design",
+                "--target",
+                "NM_INPROC_3",
+                "--local-fasta",
+                fasta_path,
+                "--output-dir",
+                design_dir,
+                "--no-offtarget",
+                "--no-variant",
+                "--quiet",
+            ]
+        )
+        design_json = os.path.join(design_dir, "NM_INPROC_3_report.json")
+        report_dir = str(tmp_path / "reports")
+        rc = main(
+            [
+                "report",
+                "--results",
+                design_json,
+                "--output-dir",
+                report_dir,
+                "--basename",
+                "nohtml",
+                "--no-html",
+                "--quiet",
+            ]
+        )
+        assert rc == 0
+        assert os.path.exists(os.path.join(report_dir, "nohtml.json"))
+        assert not os.path.exists(os.path.join(report_dir, "nohtml.html"))
+
+    def test_info_default(self, capsys):
+        rc = main(["info", "--quiet"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Version:" in out
+        assert "Candidate Configuration" in out
+        assert "Reporting Configuration" in out
+
+    def test_info_show_weights_and_presets(self, capsys):
+        rc = main(["info", "--show-weights", "--show-presets", "--quiet"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Scoring Weights" in out
+        assert "Chemistry Presets" in out
+
+    def test_info_custom_chemistry(self, capsys):
+        rc = main(["info", "--chemistry", "2ome", "--quiet"])
+        assert rc == 0
+        assert "Chemistry:      2ome" in capsys.readouterr().out
