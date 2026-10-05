@@ -424,8 +424,9 @@ def create_score_engine(
     register_all : bool
         If True, register all available score components
         (accessibility, thermodynamics, gc_content, off_target,
-        variant, self_structure, positional). Components are
-        registered only if their corresponding modules are importable.
+        variant, self_structure, positional). Each component class is
+        defined in this module; a component that fails to construct is
+        skipped with a debug log.
 
     Returns
     -------
@@ -446,35 +447,25 @@ def create_score_engine(
 def _register_default_components(engine: ScoreEngine) -> None:
     """Register all default score components with the engine.
 
-    Each component is imported and registered individually so that
-    missing components don't prevent the engine from starting.
+    Components are referenced directly (no dynamic imports): they live
+    in this module and are fully defined by the time this function is
+    called at runtime. A component that raises a ScoringError during
+    construction is skipped with a debug log so one broken component
+    cannot prevent the engine from starting.
     """
-    # Core components (Step 33)
-    _try_register(engine, "AccessibilityScoreComponent")
-    _try_register(engine, "ThermodynamicsScoreComponent")
-    _try_register(engine, "GCContentScoreComponent")
-
-    # Additional components (Step 34)
-    _try_register(engine, "OffTargetScoreComponent")
-    _try_register(engine, "VariantScoreComponent")
-    _try_register(engine, "SelfStructureScoreComponent")
-    _try_register(engine, "PositionalScoreComponent")
-
-
-def _try_register(engine: ScoreEngine, class_name: str) -> None:
-    """Try to import and register a component by class name."""
-    import importlib
-
-    try:
-        module = importlib.import_module("aso_designer.scoring")
-        component_cls = getattr(module, class_name, None)
-        if component_cls is None:
-            return
-        engine.register_component(component_cls())
-    except ScoringError as e:
-        logger.debug("Skipping component %s: %s", class_name, e)
-    except Exception as e:
-        logger.debug("Could not register %s: %s", class_name, e)
+    for component_cls in (
+        AccessibilityScoreComponent,
+        ThermodynamicsScoreComponent,
+        GCContentScoreComponent,
+        OffTargetScoreComponent,
+        VariantScoreComponent,
+        SelfStructureScoreComponent,
+        PositionalScoreComponent,
+    ):
+        try:
+            engine.register_component(component_cls())
+        except ScoringError as e:
+            logger.debug("Skipping component %s: %s", component_cls.__name__, e)
 
 
 # ---------------------------------------------------------------------------

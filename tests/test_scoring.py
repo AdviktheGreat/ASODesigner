@@ -223,6 +223,18 @@ class TestCreateScoreEngine:
         engine = create_score_engine(register_all=False)
         assert len(engine._components) == 0
 
+    def test_register_all_registers_every_default_component(self):
+        engine = create_score_engine(register_all=True)
+        assert set(engine._components) == {
+            "accessibility",
+            "thermodynamics",
+            "gc_content",
+            "off_target",
+            "variant",
+            "self_structure",
+            "positional",
+        }
+
 
 # ---------------------------------------------------------------------------
 # AccessibilityScoreComponent
