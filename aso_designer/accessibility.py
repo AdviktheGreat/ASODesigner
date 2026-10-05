@@ -237,7 +237,8 @@ class TargetStructurePredictor:
         try:
             with open(path, "rb") as f:
                 return pickle.load(f)  # noqa: S301
-        except Exception as e:
+        except (pickle.PickleError, EOFError, OSError) as e:
+            # Corrupt or unreadable cache entries are recomputed, not fatal
             logger.warning("Failed to load cache %s: %s", path, e)
             return None
 
@@ -249,7 +250,8 @@ class TargetStructurePredictor:
         try:
             with open(path, "wb") as f:
                 pickle.dump(result, f)
-        except Exception as e:
+        except OSError as e:
+            # Cache write failures (disk full, permissions) are non-fatal
             logger.warning("Failed to save cache %s: %s", path, e)
 
 
