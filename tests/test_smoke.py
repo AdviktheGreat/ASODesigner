@@ -12,6 +12,14 @@ def test_package_imports() -> None:
     assert aso_designer.__version__ == "1.0.0"
 
 
+def test_public_api_exposed() -> None:
+    """Every name in __all__ resolves to a real attribute."""
+    import aso_designer
+
+    for name in aso_designer.__all__:
+        assert hasattr(aso_designer, name), f"missing public API name: {name}"
+
+
 def test_config_loads() -> None:
     """Verify the default configuration loads and validates."""
     config = load_config()
