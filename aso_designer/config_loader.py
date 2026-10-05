@@ -99,6 +99,10 @@ def load_config(
     effective_chemistry = chemistry or config_data.get("candidate", {}).get("chemistry")
     if effective_chemistry:
         config_data = _apply_chemistry_preset(config_data, effective_chemistry)
+        # The preset only adjusts parameters; make sure the selected
+        # chemistry itself is what the validated config carries (user
+        # overrides below win over this value via the deep merge).
+        config_data.setdefault("candidate", {})["chemistry"] = effective_chemistry
 
     # Apply user overrides
     if user_config_path is not None:
