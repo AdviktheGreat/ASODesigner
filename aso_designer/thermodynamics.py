@@ -14,6 +14,7 @@ unless otherwise specified.
 """
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -164,6 +165,7 @@ def _is_self_complementary(sequence: str, rna: bool = False) -> bool:
     return seq == complement[::-1]
 
 
+@lru_cache(maxsize=65536)
 def calculate_nn_thermodynamics(
     sequence: str,
     rna: bool = False,
@@ -171,7 +173,10 @@ def calculate_nn_thermodynamics(
     """Calculate total ΔH and ΔS using the nearest-neighbor model.
 
     Sums nearest-neighbor stacking enthalpies and entropies, plus
-    initiation and symmetry corrections.
+    initiation and symmetry corrections. Results are memoized per
+    (sequence, rna) pair — batch scoring of sliding-window candidates
+    calls this repeatedly with overlapping sequences, so caching
+    eliminates redundant computation.
 
     Parameters
     ----------

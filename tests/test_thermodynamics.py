@@ -151,6 +151,17 @@ class TestCalculateNNThermodynamics:
         # Should convert T to U internally
         assert dh < 0
 
+    def test_results_are_memoized(self):
+        """Repeated calls with the same (sequence, rna) reuse the cache."""
+        seq = "ATGCATGCATGCATGCATGC"
+        first = calculate_nn_thermodynamics(seq)
+        second = calculate_nn_thermodynamics(seq)
+        assert first == second
+        assert first is second  # same cached tuple object
+        info_before = calculate_nn_thermodynamics.cache_info().hits
+        calculate_nn_thermodynamics(seq)
+        assert calculate_nn_thermodynamics.cache_info().hits == info_before + 1
+
 
 # ---------------------------------------------------------------------------
 # Tm calculation
