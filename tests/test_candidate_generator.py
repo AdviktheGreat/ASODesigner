@@ -108,6 +108,26 @@ def test_generate_candidates_batched() -> None:
     assert len(batched) > 1  # multiple batches
 
 
+def test_batched_generation_supports_regions() -> None:
+    """Batched generation honors the same regions argument as direct."""
+    seq = "ATGC" * 40  # 160 nt
+    cfg = CandidateConfig(length=10, step=5)
+    regions = [(0, 40), (80, 120), (900, 1000)]  # last one out of bounds
+
+    direct = generate_candidates(seq, cfg, regions=regions)
+    flattened = [
+        c
+        for batch in generate_candidates_batched(seq, cfg, batch_size=2, regions=regions)
+        for c in batch
+    ]
+
+    assert [(c.start, c.end, c.sequence) for c in flattened] == [
+        (c.start, c.end, c.sequence) for c in direct
+    ]
+    # Starts 0..30 step 5 within (0,40) and 80..110 within (80,120): 7 + 7
+    assert len(direct) == 14
+
+
 def test_count_candidates() -> None:
     """count_candidates matches actual generation count."""
     seq = "ATGCATGCATGCATGCATGCATGCATGCATGC"  # 32 nt

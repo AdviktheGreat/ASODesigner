@@ -20,6 +20,84 @@ from aso_designer.utils.sequence import gc_content, validate_sequence
 logger = get_logger(__name__)
 
 
+def _iter_candidate_windows(
+    sequence: str,
+    config: CandidateConfig,
+    regions: Sequence[tuple[int, int]] | None = None,
+) -> Generator[tuple[int, int], None, None]:
+    """Yield absolute (start, end) windows for candidate generation.
+
+    Shared by ``generate_candidates`` and ``generate_candidates_batched``
+    so the region-validation and stepping logic cannot drift apart.
+    """
+    seq_len = len(sequence)
+    aso_len = config.length
+    step = config.step
+
+    if aso_len > seq_len:
+        logger.warning(
+            "ASO length (%d) exceeds transcript length (%d) — no candidates",
+            aso_len,
+            seq_len,
+        )
+        return
+
+    scan_regions = list(regions) if regions is not None else [(0, seq_len)]
+
+    for region_start, region_end in scan_regions:
+        # Validate region boundaries
+        if region_start < 0 or region_end > seq_len or region_start >= region_end:
+            logger.warning("Skipping invalid region: (%d, %d)", region_start, region_end)
+            continue
+
+        max_start = (region_end - region_start) - aso_len
+        if max_start < 0:
+            logger.debug(
+                "Region (%d, %d) too short for ASO length %d",
+                region_start,
+                region_end,
+                aso_len,
+            )
+            continue
+
+        for i in range(0, max_start + 1, step):
+            abs_start = region_start + i
+            yield abs_start, abs_start + aso_len
+
+
+def _build_candidate(
+    seq: str,
+    abs_start: int,
+    abs_end: int,
+    config: CandidateConfig,
+    metadata: TranscriptMetadata | None,
+) -> ASOCandidate | None:
+    """Build one candidate for a window, or None if the sequence is invalid."""
+    subseq = seq[abs_start:abs_end]
+
+    # Skip sequences with invalid characters
+    try:
+        subseq = validate_sequence(subseq, allow_rna=False, allow_iupac=False)
+    except InvalidSequenceError:
+        logger.debug("Skipping candidate at %d: invalid characters", abs_start)
+        return None
+
+    region_label = "unknown"
+    if metadata is not None:
+        region_label = classify_position(metadata, abs_start)
+
+    return ASOCandidate(
+        sequence=subseq,
+        start=abs_start,
+        end=abs_end,
+        length=config.length,
+        chemistry=config.chemistry,
+        gc_content=gc_content(subseq),
+        region=region_label,
+        passes_filters=True,  # Filtering happens later
+    )
+
+
 def generate_candidates(
     sequence: str,
     config: CandidateConfig,
@@ -52,81 +130,19 @@ def generate_candidates(
         All generated candidates (before filtering).
     """
     seq = sequence.upper()
-    seq_len = len(seq)
-    aso_len = config.length
-    step = config.step
-
-    if aso_len > seq_len:
-        logger.warning(
-            "ASO length (%d) exceeds transcript length (%d) — no candidates",
-            aso_len,
-            seq_len,
-        )
-        return []
-
-    # Determine the regions to scan
-    if regions is not None:
-        scan_regions = list(regions)
-    else:
-        scan_regions = [(0, seq_len)]
 
     candidates: list[ASOCandidate] = []
-
-    for region_start, region_end in scan_regions:
-        # Validate region boundaries
-        if region_start < 0 or region_end > seq_len or region_start >= region_end:
-            logger.warning("Skipping invalid region: (%d, %d)", region_start, region_end)
-            continue
-
-        region_len = region_end - region_start
-        max_start = region_len - aso_len
-        if max_start < 0:
-            logger.debug(
-                "Region (%d, %d) too short for ASO length %d",
-                region_start,
-                region_end,
-                aso_len,
-            )
-            continue
-
-        for i in range(0, max_start + 1, step):
-            abs_start = region_start + i
-            abs_end = abs_start + aso_len
-            subseq = seq[abs_start:abs_end]
-
-            # Skip sequences with invalid characters
-            try:
-                subseq = validate_sequence(subseq, allow_rna=False, allow_iupac=False)
-            except InvalidSequenceError:
-                logger.debug("Skipping candidate at %d: invalid characters", abs_start)
-                continue
-
-            # Compute GC content
-            gc = gc_content(subseq)
-
-            # Determine region label
-            region_label = "unknown"
-            if metadata is not None:
-                region_label = classify_position(metadata, abs_start)
-
-            candidate = ASOCandidate(
-                sequence=subseq,
-                start=abs_start,
-                end=abs_end,
-                length=aso_len,
-                chemistry=config.chemistry,
-                gc_content=gc,
-                region=region_label,
-                passes_filters=True,  # Filtering happens later
-            )
+    for abs_start, abs_end in _iter_candidate_windows(sequence, config, regions):
+        candidate = _build_candidate(seq, abs_start, abs_end, config, metadata)
+        if candidate is not None:
             candidates.append(candidate)
 
     logger.info(
         "Generated %d ASO candidates (length=%d, step=%d, regions=%d)",
         len(candidates),
-        aso_len,
-        step,
-        len(scan_regions),
+        config.length,
+        config.step,
+        len(regions) if regions is not None else 1,
     )
     return candidates
 
@@ -136,12 +152,14 @@ def generate_candidates_batched(
     config: CandidateConfig,
     metadata: TranscriptMetadata | None = None,
     batch_size: int = 10000,
+    regions: Sequence[tuple[int, int]] | None = None,
 ) -> Generator[list[ASOCandidate], None, None]:
     """Generate ASO candidates in memory-managed batches.
 
     For very long transcripts (e.g. DMD at ~14 kb), generating all
     candidates at once can use significant memory. This generator
-    yields candidates in batches.
+    yields candidates in batches. Uses the same window/region logic as
+    ``generate_candidates``.
 
     Parameters
     ----------
@@ -153,6 +171,9 @@ def generate_candidates_batched(
         Transcript metadata for region annotation.
     batch_size : int
         Number of candidates per batch (default 10,000).
+    regions : Sequence of (int, int), optional
+        Specific regions to generate candidates within. If None,
+        candidates are generated across the entire transcript.
 
     Yields
     ------
@@ -160,43 +181,14 @@ def generate_candidates_batched(
         Batches of candidates.
     """
     seq = sequence.upper()
-    seq_len = len(seq)
-    aso_len = config.length
-    step = config.step
-
-    if aso_len > seq_len:
-        return
-
     batch: list[ASOCandidate] = []
-    max_start = seq_len - aso_len
 
-    for i in range(0, max_start + 1, step):
-        abs_start = i
-        abs_end = abs_start + aso_len
-        subseq = seq[abs_start:abs_end]
-
-        try:
-            subseq = validate_sequence(subseq, allow_rna=False, allow_iupac=False)
-        except InvalidSequenceError:
+    for abs_start, abs_end in _iter_candidate_windows(sequence, config, regions):
+        candidate = _build_candidate(seq, abs_start, abs_end, config, metadata)
+        if candidate is None:
             continue
 
-        gc = gc_content(subseq)
-        region_label = "unknown"
-        if metadata is not None:
-            region_label = classify_position(metadata, abs_start)
-
-        candidate = ASOCandidate(
-            sequence=subseq,
-            start=abs_start,
-            end=abs_end,
-            length=aso_len,
-            chemistry=config.chemistry,
-            gc_content=gc,
-            region=region_label,
-            passes_filters=True,
-        )
         batch.append(candidate)
-
         if len(batch) >= batch_size:
             yield batch
             batch = []
