@@ -3,6 +3,8 @@
 import json
 import os
 import subprocess
+import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -183,6 +185,19 @@ def _write_test_fasta(path: str, seq_id: str = "NM_TEST_100", length: int = 200)
     with open(path, "w") as f:
         f.write(f">{seq_id} Test gene\n{seq}\n")
     return path
+
+
+class TestModuleEntryPoint:
+    def test_python_m_invocation(self, capsys):
+        """`python -m aso_designer --version` runs the __main__ module body
+        and exits 0 (executed in-process with runpy so coverage records it)."""
+        import runpy
+
+        with patch.object(sys, "argv", ["aso_designer", "--version"]):
+            with pytest.raises(SystemExit) as exc_info:
+                runpy.run_module("aso_designer", run_name="__main__")
+        assert exc_info.value.code == 0
+        assert "ASODesigner" in capsys.readouterr().out
 
 
 class TestPipelineConfig:
