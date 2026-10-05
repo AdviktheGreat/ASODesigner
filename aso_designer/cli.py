@@ -807,10 +807,14 @@ def _handle_info(args: argparse.Namespace) -> int:
     # Show chemistry presets
     if args.show_presets:
         print("  Chemistry Presets:")
-        from aso_designer.config_loader import _CHEMISTRY_PRESETS_PATH, load_yaml
+        from aso_designer.config_loader import load_chemistry_presets
+        from aso_designer.utils.exceptions import ConfigurationError
 
-        if _CHEMISTRY_PRESETS_PATH.exists():
-            presets = load_yaml(_CHEMISTRY_PRESETS_PATH)
+        try:
+            presets = load_chemistry_presets()
+        except ConfigurationError:
+            presets = None
+        if presets:
             for chem_name, preset in presets.items():
                 print(f"    {chem_name}:")
                 for key, value in preset.items():

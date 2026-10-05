@@ -6,12 +6,12 @@ Designed from scratch — GuideX uses a flat cache directory; we organize
 by organism for faster bulk operations and easier manual inspection.
 """
 
-import hashlib
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from aso_designer.transcript_fetcher import TranscriptRecord
+from aso_designer.utils.cache_key import cache_key
 from aso_designer.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -50,8 +50,7 @@ class TranscriptCacheManager:
     def _cache_key_path(self, identifier: str, organism: str = "unknown") -> Path:
         """Generate a cache file path organized by organism."""
         org_dir = self._organism_dir(organism)
-        key_hash = hashlib.sha256(identifier.encode()).hexdigest()[:16]
-        return org_dir / f"{key_hash}.json"
+        return org_dir / f"{cache_key(identifier)}.json"
 
     def store(
         self,

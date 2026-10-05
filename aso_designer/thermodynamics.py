@@ -13,7 +13,6 @@ assumes 1 M NaCl monovalent salt and non-self-complementary sequences
 unless otherwise specified.
 """
 
-import hashlib
 import json
 from dataclasses import dataclass
 from functools import lru_cache
@@ -21,6 +20,8 @@ from pathlib import Path
 
 import yaml
 
+from aso_designer.config_loader import CHEMISTRY_PRESETS_PATH
+from aso_designer.utils.cache_key import cache_key
 from aso_designer.utils.exceptions import ThermodynamicsError
 from aso_designer.utils.logger import get_logger
 
@@ -61,7 +62,7 @@ def _vienna_cache_path(tool: str, key: str) -> Path | None:
     """Return the cache file path for a ViennaRNA call, or None if disabled."""
     if not _VIENNA_CACHE_ENABLED or _VIENNA_CACHE_DIR is None:
         return None
-    digest = hashlib.sha256(f"{tool}|{key}".encode()).hexdigest()[:20]
+    digest = cache_key(tool, key)
     return _VIENNA_CACHE_DIR / f"{tool}_{digest}.json"
 
 
@@ -88,8 +89,8 @@ def _save_vienna_cache(path: Path | None, data: dict) -> None:
         logger.warning("Failed to write thermodynamics cache %s: %s", path, e)
 
 
-# Path to the bundled chemistry presets and its per-process cache.
-_CHEMISTRY_PRESETS_PATH = Path(__file__).parent / "config" / "chemistry_presets.yaml"
+# Per-process cache for the bundled chemistry presets, loaded from
+# CHEMISTRY_PRESETS_PATH (owned by config_loader).
 _CHEMISTRY_PRESETS_CACHE: dict | None = None
 
 
@@ -108,7 +109,7 @@ def _load_chemistry_presets() -> dict:
     """
     global _CHEMISTRY_PRESETS_CACHE
     if _CHEMISTRY_PRESETS_CACHE is None:
-        with open(_CHEMISTRY_PRESETS_PATH) as f:
+        with open(CHEMISTRY_PRESETS_PATH) as f:
             _CHEMISTRY_PRESETS_CACHE = yaml.safe_load(f) or {}
     return _CHEMISTRY_PRESETS_CACHE
 

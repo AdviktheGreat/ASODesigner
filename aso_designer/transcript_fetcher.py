@@ -9,7 +9,6 @@ Requires NCBI_API_KEY environment variable for higher rate limits
 (10 req/s with key, 3 req/s without).
 """
 
-import hashlib
 import os
 import time
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
+from aso_designer.utils.cache_key import cache_key
 from aso_designer.utils.exceptions import TranscriptFetchError
 from aso_designer.utils.logger import get_logger
 from aso_designer.utils.sequence import validate_sequence
@@ -201,8 +201,7 @@ class EntrezFetcher:
 
     def _cache_key(self, identifier: str) -> Path:
         """Generate a cache file path for a given identifier."""
-        key_hash = hashlib.sha256(identifier.encode()).hexdigest()[:16]
-        return self.cache_dir / f"{key_hash}.json"
+        return self.cache_dir / f"{cache_key(identifier)}.json"
 
     def _is_cache_valid(self, cache_path: Path) -> bool:
         """Check if a cache file exists and is within TTL."""

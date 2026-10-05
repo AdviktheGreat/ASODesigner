@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 
 # Path to the bundled default config and chemistry presets.
 _DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "aso_config.yaml"
-_CHEMISTRY_PRESETS_PATH = Path(__file__).parent / "config" / "chemistry_presets.yaml"
+CHEMISTRY_PRESETS_PATH = Path(__file__).parent / "config" / "chemistry_presets.yaml"
 
 
 def load_yaml(path: str | Path) -> dict:
@@ -121,10 +121,28 @@ def load_config(
     return config
 
 
+def load_chemistry_presets() -> dict:
+    """Load the bundled chemistry presets YAML.
+
+    Returns
+    -------
+    dict
+        Chemistry presets keyed by chemistry name; empty if the file
+        is missing or unreadable.
+
+    Raises
+    ------
+    ConfigurationError
+        If the file cannot be read or parsed (callers may catch this
+        to degrade gracefully).
+    """
+    return load_yaml(CHEMISTRY_PRESETS_PATH)
+
+
 def _apply_chemistry_preset(config_data: dict, chemistry: str) -> dict:
     """Apply chemistry-specific preset adjustments to config data."""
     try:
-        presets = load_yaml(_CHEMISTRY_PRESETS_PATH)
+        presets = load_chemistry_presets()
     except ConfigurationError:
         logger.warning("Chemistry presets file not found; skipping preset.")
         return config_data
