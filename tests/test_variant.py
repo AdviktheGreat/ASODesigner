@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -393,6 +394,25 @@ class TestDbSNPClient:
         client = DbSNPClient(email="test@test.com")
         variants = client.fetch_variants_by_gene("UNKNOWNGENE")
         assert len(variants) == 0
+
+    @patch("urllib.request.urlopen")
+    def test_fetch_network_error_wrapped(self, mock_urlopen):
+        """Network failures are wrapped as VariantError."""
+        mock_urlopen.side_effect = urllib.error.URLError("connection refused")
+        client = DbSNPClient(email="test@test.com")
+        with pytest.raises(VariantError, match="ESearch failed"):
+            client.fetch_variants_by_gene("DMD")
+
+    @patch("urllib.request.urlopen")
+    def test_fetch_bad_json_wrapped(self, mock_urlopen):
+        """Undecodable responses are wrapped as VariantError."""
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"not json at all"
+        mock_urlopen.return_value.__enter__ = MagicMock(return_value=mock_resp)
+        mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+        client = DbSNPClient(email="test@test.com")
+        with pytest.raises(VariantError, match="ESearch failed"):
+            client.fetch_variants_by_gene("DMD")
 
 
 class TestClinVarClient:

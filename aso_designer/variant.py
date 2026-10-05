@@ -13,12 +13,19 @@ significance are used for candidate ranking, not clinical diagnosis.
 
 from __future__ import annotations
 
+import http.client
 from dataclasses import dataclass
 
 from aso_designer.utils.exceptions import VariantError
 from aso_designer.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Expected failure modes for NCBI API calls: network/socket errors
+# (URLError and HTTPError subclass OSError), HTTP protocol errors
+# (http.client.HTTPException), and decode/JSON errors (both
+# UnicodeDecodeError and JSONDecodeError subclass ValueError).
+_API_ERRORS = (OSError, http.client.HTTPException, ValueError)
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +325,7 @@ class DbSNPClient:
                 import json
 
                 data = json.loads(resp.read().decode())
-        except Exception as e:
+        except _API_ERRORS as e:
             raise VariantError(f"dbSNP ESearch failed for gene {gene_name}: {e}") from e
 
         ids = data.get("esearchresult", {}).get("idlist", [])
@@ -360,7 +367,7 @@ class DbSNPClient:
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode())
-        except Exception as e:
+        except _API_ERRORS as e:
             raise VariantError(f"dbSNP ESummary failed: {e}") from e
 
         result_list = data.get("result", [])
@@ -563,7 +570,7 @@ class ClinVarClient:
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode())
-        except Exception as e:
+        except _API_ERRORS as e:
             raise VariantError(f"ClinVar ESearch failed for gene {gene_name}: {e}") from e
 
         ids = data.get("esearchresult", {}).get("idlist", [])
@@ -608,7 +615,7 @@ class ClinVarClient:
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode())
-        except Exception as e:
+        except _API_ERRORS as e:
             raise VariantError(f"ClinVar ESummary failed: {e}") from e
 
         result_list = data.get("result", [])
