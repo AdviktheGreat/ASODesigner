@@ -117,6 +117,11 @@ thermodynamics:
   # Minimum net binding ΔG (kcal/mol). More negative = stronger binding.
   binding_min: -5.0
 
+  # Optional directory for caching ViennaRNA duplex/self-structure results
+  # on disk. Only used with the ViennaRNA methods; speeds up repeated runs
+  # over the same candidates. Leave unset to disable caching.
+  # cache_dir: .aso_cache/thermo
+
 # ---------------------------------------------------------------------------
 # Off-target analysis
 # ---------------------------------------------------------------------------

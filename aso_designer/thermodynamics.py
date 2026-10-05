@@ -13,6 +13,8 @@ assumes 1 M NaCl monovalent salt and non-self-complementary sequences
 unless otherwise specified.
 """
 
+import hashlib
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -23,6 +25,68 @@ from aso_designer.utils.exceptions import ThermodynamicsError
 from aso_designer.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Optional on-disk cache for ViennaRNA results (see set_thermodynamics_cache).
+_VIENNA_CACHE_DIR: Path | None = None
+_VIENNA_CACHE_ENABLED: bool = False
+
+
+def set_thermodynamics_cache(cache_dir: str | Path | None) -> None:
+    """Enable or disable the on-disk cache for ViennaRNA results.
+
+    Parameters
+    ----------
+    cache_dir : str | Path | None
+        Directory for cached duplex/self/target structure results, or
+        None to disable caching. Results are stored as small JSON files
+        keyed by a hash of the tool and input sequence, mirroring the
+        accessibility-stage cache.
+    """
+    global _VIENNA_CACHE_DIR, _VIENNA_CACHE_ENABLED
+    if cache_dir is None:
+        _VIENNA_CACHE_DIR = None
+        _VIENNA_CACHE_ENABLED = False
+        return
+    _VIENNA_CACHE_DIR = Path(cache_dir)
+    try:
+        _VIENNA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.warning("Could not create thermodynamics cache dir: %s", e)
+        _VIENNA_CACHE_ENABLED = False
+        return
+    _VIENNA_CACHE_ENABLED = True
+
+
+def _vienna_cache_path(tool: str, key: str) -> Path | None:
+    """Return the cache file path for a ViennaRNA call, or None if disabled."""
+    if not _VIENNA_CACHE_ENABLED or _VIENNA_CACHE_DIR is None:
+        return None
+    digest = hashlib.sha256(f"{tool}|{key}".encode()).hexdigest()[:20]
+    return _VIENNA_CACHE_DIR / f"{tool}_{digest}.json"
+
+
+def _load_vienna_cache(path: Path | None) -> dict | None:
+    """Load a cached ViennaRNA result; None on miss or corruption."""
+    if path is None:
+        return None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _save_vienna_cache(path: Path | None, data: dict) -> None:
+    """Persist a ViennaRNA result; failures are non-fatal."""
+    if path is None:
+        return
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f)
+    except OSError as e:
+        logger.warning("Failed to write thermodynamics cache %s: %s", path, e)
+
 
 # Path to the bundled chemistry presets and its per-process cache.
 _CHEMISTRY_PRESETS_PATH = Path(__file__).parent / "config" / "chemistry_presets.yaml"
@@ -570,12 +634,29 @@ def calculate_duplex_dg_rnaduplex(
     ThermodynamicsError
         If RNAduplex fails.
     """
+    cache_path = _vienna_cache_path("rnaduplex", f"{aso_sequence}|{target_sequence}")
+    cached = _load_vienna_cache(cache_path)
+    if cached is not None:
+        return DuplexResult(
+            aso_sequence=aso_sequence.upper(),
+            target_sequence=target_sequence.upper(),
+            method="rnaduplex",
+            dg_duplex=cached["mfe"],
+            start_target=cached["start2"],
+            end_target=cached["end2"],
+        )
+
     from aso_designer.viennarna import run_rnaduplex
 
     try:
         result = run_rnaduplex(aso_sequence, target_sequence)
     except Exception as e:
         raise ThermodynamicsError(f"RNAduplex failed for ASO:target duplex: {e}") from e
+
+    _save_vienna_cache(
+        cache_path,
+        {"mfe": result.mfe, "start2": result.start2, "end2": result.end2},
+    )
 
     return DuplexResult(
         aso_sequence=aso_sequence.upper(),
@@ -716,12 +797,24 @@ def calculate_self_structure_dg_rnafold(
     ThermodynamicsError
         If RNAfold fails.
     """
+    cache_path = _vienna_cache_path("rnafold", aso_sequence)
+    cached = _load_vienna_cache(cache_path)
+    if cached is not None:
+        return SelfStructureResult(
+            sequence=aso_sequence.upper(),
+            dg_self=cached["mfe"],
+            structure=cached["structure"],
+            method="rnafold",
+        )
+
     from aso_designer.viennarna import run_rnafold
 
     try:
         result = run_rnafold(aso_sequence)
     except Exception as e:
         raise ThermodynamicsError(f"RNAfold failed for self-structure: {e}") from e
+
+    _save_vienna_cache(cache_path, {"mfe": result.mfe, "structure": result.structure})
 
     return SelfStructureResult(
         sequence=aso_sequence.upper(),
@@ -935,12 +1028,24 @@ def calculate_target_structure_dg_rnafold(
     TargetStructureResult
         Target structure ΔG and dot-bracket structure.
     """
+    cache_path = _vienna_cache_path("rnafold", target_sequence)
+    cached = _load_vienna_cache(cache_path)
+    if cached is not None:
+        return TargetStructureResult(
+            target_sequence=target_sequence.upper(),
+            dg_target=cached["mfe"],
+            structure=cached["structure"],
+            method="rnafold",
+        )
+
     from aso_designer.viennarna import run_rnafold
 
     try:
         result = run_rnafold(target_sequence)
     except Exception as e:
         raise ThermodynamicsError(f"RNAfold failed for target structure: {e}") from e
+
+    _save_vienna_cache(cache_path, {"mfe": result.mfe, "structure": result.structure})
 
     return TargetStructureResult(
         target_sequence=target_sequence.upper(),

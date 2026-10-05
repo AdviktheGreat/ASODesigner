@@ -432,13 +432,19 @@ class ASOPipeline:
         tools are needed; ViennaRNA methods raise (and the pipeline
         degrades gracefully) when ViennaRNA is unavailable.
         """
-        from aso_designer.thermodynamics import compute_thermodynamic_summary
+        from aso_designer.thermodynamics import (
+            compute_thermodynamic_summary,
+            set_thermodynamics_cache,
+        )
 
         if self._transcript is None:
             raise RuntimeError("No transcript available for thermodynamic analysis")
 
         t_cfg = self.aso_config.thermodynamics
         transcript_seq = self._transcript.sequence
+
+        if t_cfg.cache_dir:
+            set_thermodynamics_cache(t_cfg.cache_dir)
 
         computed = 0
         for candidate in self._candidates:

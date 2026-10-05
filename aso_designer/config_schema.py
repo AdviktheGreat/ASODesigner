@@ -135,6 +135,13 @@ class ThermodynamicsConfig(BaseModel):
         ),
     )
     binding_min: float = Field(default=-5.0, description="Min net binding ΔG (kcal/mol).")
+    cache_dir: str | None = Field(
+        default=None,
+        description=(
+            "Optional directory for caching ViennaRNA duplex/self-structure "
+            "results on disk (reduces repeat invocations across runs)."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_method(self) -> "ThermodynamicsConfig":

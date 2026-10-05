@@ -1,6 +1,6 @@
 """Tests for thermodynamic calculations (Tm, ΔG, self-structure, net binding)."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -19,9 +19,11 @@ from aso_designer.thermodynamics import (
     calculate_nn_thermodynamics,
     calculate_self_structure_dg,
     calculate_self_structure_dg_nn,
+    calculate_self_structure_dg_rnafold,
     calculate_self_structure_penalty,
     calculate_target_structure_dg,
     calculate_target_structure_dg_nn,
+    calculate_target_structure_dg_rnafold,
     calculate_tm,
     calculate_tm_with_chemistry,
     classify_binding,
@@ -29,6 +31,7 @@ from aso_designer.thermodynamics import (
     get_chemistry_self_structure_weight,
     get_chemistry_tm_adjustment,
     score_tm,
+    set_thermodynamics_cache,
 )
 from aso_designer.utils.exceptions import ThermodynamicsError
 from aso_designer.viennarna import RNAduplexResult, RNAfoldResult
@@ -161,6 +164,75 @@ class TestCalculateNNThermodynamics:
         info_before = calculate_nn_thermodynamics.cache_info().hits
         calculate_nn_thermodynamics(seq)
         assert calculate_nn_thermodynamics.cache_info().hits == info_before + 1
+
+
+class TestViennaDiskCache:
+    """On-disk cache for ViennaRNA duplex/self-structure results."""
+
+    def teardown_method(self):
+        set_thermodynamics_cache(None)
+
+    @patch("aso_designer.viennarna.run_rnaduplex")
+    def test_duplex_cached_on_disk(self, mock_duplex, tmp_path):
+        mock_duplex.return_value = MagicMock(mfe=-12.5, start2=3, end2=22)
+
+        set_thermodynamics_cache(tmp_path)
+        first = calculate_duplex_dg_rnaduplex("ATGCATGCATGC", "AUGCAUGCAUGC")
+        second = calculate_duplex_dg_rnaduplex("ATGCATGCATGC", "AUGCAUGCAUGC")
+
+        assert mock_duplex.call_count == 1  # second call served from disk
+        assert first.dg_duplex == second.dg_duplex == -12.5
+        assert second.start_target == 3
+        assert second.end_target == 22
+        assert list(tmp_path.glob("rnaduplex_*.json"))
+
+    @patch("aso_designer.viennarna.run_rnafold")
+    def test_self_structure_cached_on_disk(self, mock_rnafold, tmp_path):
+        mock_rnafold.return_value = MagicMock(mfe=-4.2, structure="....")
+
+        set_thermodynamics_cache(tmp_path)
+        first = calculate_self_structure_dg_rnafold("ATGCATGCATGC")
+        second = calculate_self_structure_dg_rnafold("ATGCATGCATGC")
+
+        assert mock_rnafold.call_count == 1
+        assert first.dg_self == second.dg_self == -4.2
+        assert second.structure == "...."
+
+    @patch("aso_designer.viennarna.run_rnafold")
+    def test_target_structure_shares_cache_with_self(self, mock_rnafold, tmp_path):
+        """The same RNAfold call feeds both self- and target-structure caches."""
+        mock_rnafold.return_value = MagicMock(mfe=-1.5, structure="..")
+
+        set_thermodynamics_cache(tmp_path)
+        calculate_self_structure_dg_rnafold("AUGCAUGC")
+        result = calculate_target_structure_dg_rnafold("AUGCAUGC")
+
+        assert mock_rnafold.call_count == 1  # reused the self-structure entry
+        assert result.dg_target == -1.5
+
+    @patch("aso_designer.viennarna.run_rnaduplex")
+    def test_cache_disabled_by_default(self, mock_duplex):
+        mock_duplex.return_value = MagicMock(mfe=-3.0, start2=0, end2=5)
+
+        set_thermodynamics_cache(None)
+        calculate_duplex_dg_rnaduplex("ATGCATGCATGC", "AUGCAUGCAUGC")
+        calculate_duplex_dg_rnaduplex("ATGCATGCATGC", "AUGCAUGCAUGC")
+
+        assert mock_duplex.call_count == 2
+
+    @patch("aso_designer.viennarna.run_rnaduplex")
+    def test_corrupt_cache_entry_is_recomputed(self, mock_duplex, tmp_path):
+        mock_duplex.return_value = MagicMock(mfe=-3.0, start2=0, end2=5)
+
+        set_thermodynamics_cache(tmp_path)
+        calculate_duplex_dg_rnaduplex("ATGCATGCATGC", "AUGCAUGCAUGC")
+        # Corrupt every cache file on disk.
+        for f in tmp_path.glob("*.json"):
+            f.write_text("not json {")
+        result = calculate_duplex_dg_rnaduplex("ATGCATGCATGC", "AUGCAUGCAUGC")
+
+        assert mock_duplex.call_count == 2
+        assert result.dg_duplex == -3.0
 
 
 # ---------------------------------------------------------------------------
