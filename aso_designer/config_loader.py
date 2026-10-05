@@ -9,6 +9,7 @@ presets. Designed from scratch with layered override support
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
 from aso_designer.config_schema import ASOConfig
 from aso_designer.utils.exceptions import ConfigurationError
@@ -113,7 +114,7 @@ def load_config(
     # Validate
     try:
         config = ASOConfig(**config_data)
-    except Exception as e:
+    except ValidationError as e:
         raise ConfigurationError(f"Config validation failed: {e}") from e
 
     logger.info("Configuration loaded and validated successfully")
