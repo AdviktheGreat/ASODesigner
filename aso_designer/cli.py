@@ -17,6 +17,7 @@ from collections.abc import Sequence
 
 from aso_designer import __version__
 from aso_designer.utils.logger import get_logger
+from aso_designer.utils.sequence import is_accession  # noqa: F401 (re-export)
 
 logger = get_logger(__name__)
 
@@ -502,26 +503,6 @@ def validate_target(target: str) -> str:
             f"Invalid target '{target}': use gene symbol (BRCA1) or accession (NM_007294)."
         )
     return normalized
-
-
-def is_accession(target: str) -> bool:
-    """Check if a target string looks like an NCBI accession.
-
-    Accessions match patterns like NM_001123, NR_123456, XM_456789.
-
-    Parameters
-    ----------
-    target : str
-        Target string.
-
-    Returns
-    -------
-    bool
-        True if the target looks like an accession.
-    """
-    import re
-
-    return bool(re.match(r"^[A-Z]{1,4}_\d+(\.\d+)?$", target.strip().upper()))
 
 
 # ---------------------------------------------------------------------------

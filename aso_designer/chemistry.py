@@ -15,6 +15,8 @@ Supported chemistries:
 from dataclasses import dataclass
 from typing import Protocol
 
+from aso_designer.candidate import ASOCandidate
+from aso_designer.config_schema import CandidateConfig, GapmerConfig, MixmerConfig
 from aso_designer.utils.exceptions import ConfigurationError
 from aso_designer.utils.logger import get_logger
 
@@ -210,9 +212,6 @@ class FullChemistryDesign:
 # ---------------------------------------------------------------------------
 # Chemistry factory and application
 # ---------------------------------------------------------------------------
-
-from aso_designer.candidate import ASOCandidate  # noqa: E402
-from aso_designer.config_schema import CandidateConfig, GapmerConfig, MixmerConfig  # noqa: E402
 
 
 def create_chemistry_design(

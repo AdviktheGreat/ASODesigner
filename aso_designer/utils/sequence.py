@@ -168,3 +168,23 @@ def dna_to_rna(sequence: str) -> str:
 def rna_to_dna(sequence: str) -> str:
     """Convert an RNA sequence to DNA (U → T)."""
     return sequence.upper().replace("U", "T")
+
+
+def is_accession(target: str) -> bool:
+    """Check if a target string looks like an NCBI accession.
+
+    Accessions match patterns like NM_001123, NR_123456, XM_456789.1.
+
+    Parameters
+    ----------
+    target : str
+        Target string.
+
+    Returns
+    -------
+    bool
+        True if the target looks like an accession.
+    """
+    import re
+
+    return bool(re.match(r"^[A-Z]{1,4}_\d+(\.\d+)?$", target.strip().upper()))

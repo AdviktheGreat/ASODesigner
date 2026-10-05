@@ -299,8 +299,8 @@ class ASOPipeline:
 
     def _stage_fetch(self) -> None:
         """Fetch the target transcript."""
-        from aso_designer.cli import is_accession
         from aso_designer.fetch_manager import FetchManager
+        from aso_designer.utils.sequence import is_accession
 
         fm = FetchManager(local_fasta=self.config.local_fasta)
 

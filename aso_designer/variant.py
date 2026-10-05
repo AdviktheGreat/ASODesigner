@@ -14,7 +14,12 @@ significance are used for candidate ranking, not clinical diagnosis.
 from __future__ import annotations
 
 import http.client
+import json
+import time
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 from aso_designer.utils.exceptions import VariantError
 from aso_designer.utils.logger import get_logger
@@ -294,10 +299,6 @@ class DbSNPClient:
         VariantError
             If the API request fails.
         """
-        import time
-        import urllib.parse
-        import urllib.request
-
         # Rate limiting
         elapsed = time.time() - self._last_request_time
         if elapsed < self.rate_limit:
@@ -322,8 +323,6 @@ class DbSNPClient:
             self._last_request_time = time.time()
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=30) as resp:
-                import json
-
                 data = json.loads(resp.read().decode())
         except _API_ERRORS as e:
             raise VariantError(f"dbSNP ESearch failed for gene {gene_name}: {e}") from e
@@ -340,11 +339,6 @@ class DbSNPClient:
 
     def _fetch_summaries(self, ids: list[str]) -> list[Variant]:
         """Fetch variant summaries from ESummary."""
-        import json
-        import time
-        import urllib.parse
-        import urllib.request
-
         # Rate limiting
         elapsed = time.time() - self._last_request_time
         if elapsed < self.rate_limit:
@@ -536,11 +530,6 @@ class ClinVarClient:
         VariantError
             If the API request fails.
         """
-        import json
-        import time
-        import urllib.parse
-        import urllib.request
-
         # Rate limiting
         elapsed = time.time() - self._last_request_time
         if elapsed < self.rate_limit:
@@ -589,11 +578,6 @@ class ClinVarClient:
 
     def _fetch_clinvar_summaries(self, ids: list[str]) -> list[Variant]:
         """Fetch ClinVar variant summaries from ESummary."""
-        import json
-        import time
-        import urllib.parse
-        import urllib.request
-
         elapsed = time.time() - self._last_request_time
         if elapsed < self.rate_limit:
             time.sleep(self.rate_limit - elapsed)
@@ -875,8 +859,6 @@ def parse_vcf(file_path: str) -> list[Variant]:
     VariantError
         If the file cannot be read or is not valid VCF.
     """
-    from pathlib import Path
-
     path = Path(file_path)
     if not path.exists():
         raise VariantError(f"VCF file not found: {path}")
