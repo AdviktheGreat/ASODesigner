@@ -242,8 +242,68 @@ class VariantSet:
 # NCBI E-utilities base URL
 _EUTILS_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
+# NCBI request limits: 30 s HTTP timeout; ~3 req/s without an API key,
+# 10 req/s with one (NCBI published limits).
+_NCBI_TIMEOUT_S = 30
+_RATE_LIMIT_WITH_KEY = 0.1
+_RATE_LIMIT_DEFAULT = 0.34
 
-class DbSNPClient:
+
+class _EUtilsClient:
+    """Shared NCBI E-utilities plumbing for the dbSNP and ClinVar clients.
+
+    Handles rate limiting, credential parameters, request dispatch, and
+    JSON decoding. Call sites pass a descriptive ``error_label`` so
+    failures are wrapped as VariantError with the original wording.
+    """
+
+    def __init__(
+        self,
+        email: str = "",
+        api_key: str | None = None,
+        rate_limit: float | None = None,
+    ):
+        self.email = email
+        self.api_key = api_key
+        self.rate_limit = rate_limit or (_RATE_LIMIT_WITH_KEY if api_key else _RATE_LIMIT_DEFAULT)
+        self._last_request_time: float = 0.0
+
+    def _throttle(self) -> None:
+        """Sleep long enough to respect the configured NCBI rate limit."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.rate_limit:
+            time.sleep(self.rate_limit - elapsed)
+
+    def _eutils_get(
+        self,
+        endpoint: str,
+        params: dict[str, str],
+        error_label: str,
+    ) -> dict:
+        """GET an E-utilities endpoint and return the parsed JSON.
+
+        Raises
+        ------
+        VariantError
+            On network, HTTP, or decode failures.
+        """
+        if self.email:
+            params["email"] = self.email
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        url = f"{_EUTILS_URL}/{endpoint}?" + urllib.parse.urlencode(params)
+        self._throttle()
+        self._last_request_time = time.time()
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=_NCBI_TIMEOUT_S) as resp:
+                return json.loads(resp.read().decode())
+        except _API_ERRORS as e:
+            raise VariantError(f"{error_label}: {e}") from e
+
+
+class DbSNPClient(_EUtilsClient):
     """Client for fetching variant data from NCBI dbSNP via E-utilities.
 
     Uses NCBI ESearch and ESummary to find variants by gene name
@@ -257,20 +317,9 @@ class DbSNPClient:
     api_key : str, optional
         NCBI API key for higher rate limits.
     rate_limit : float
-        Minimum seconds between requests (default 0.34 with API key,
-        0.55 without).
+        Minimum seconds between requests (default 0.1 with API key,
+        0.34 without).
     """
-
-    def __init__(
-        self,
-        email: str = "",
-        api_key: str | None = None,
-        rate_limit: float | None = None,
-    ):
-        self.email = email
-        self.api_key = api_key
-        self.rate_limit = rate_limit or (0.1 if api_key else 0.34)
-        self._last_request_time: float = 0.0
 
     def fetch_variants_by_gene(
         self,
@@ -299,33 +348,18 @@ class DbSNPClient:
         VariantError
             If the API request fails.
         """
-        # Rate limiting
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self.rate_limit:
-            time.sleep(self.rate_limit - elapsed)
-
         # ESearch: find dbSNP records for the gene
         search_term = f"{gene_name}[Gene] AND {organism}[Organism] AND snp[SNP]"
-        params = {
-            "db": "snp",
-            "term": search_term,
-            "retmax": str(max_results),
-            "retmode": "json",
-        }
-        if self.email:
-            params["email"] = self.email
-        if self.api_key:
-            params["api_key"] = self.api_key
-
-        url = f"{_EUTILS_URL}/esearch.fcgi?" + urllib.parse.urlencode(params)
-
-        try:
-            self._last_request_time = time.time()
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-        except _API_ERRORS as e:
-            raise VariantError(f"dbSNP ESearch failed for gene {gene_name}: {e}") from e
+        data = self._eutils_get(
+            "esearch.fcgi",
+            {
+                "db": "snp",
+                "term": search_term,
+                "retmax": str(max_results),
+                "retmode": "json",
+            },
+            f"dbSNP ESearch failed for gene {gene_name}",
+        )
 
         ids = data.get("esearchresult", {}).get("idlist", [])
         if not ids:
@@ -339,30 +373,11 @@ class DbSNPClient:
 
     def _fetch_summaries(self, ids: list[str]) -> list[Variant]:
         """Fetch variant summaries from ESummary."""
-        # Rate limiting
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self.rate_limit:
-            time.sleep(self.rate_limit - elapsed)
-
-        params = {
-            "db": "snp",
-            "id": ",".join(ids),
-            "retmode": "json",
-        }
-        if self.email:
-            params["email"] = self.email
-        if self.api_key:
-            params["api_key"] = self.api_key
-
-        url = f"{_EUTILS_URL}/esummary.fcgi?" + urllib.parse.urlencode(params)
-
-        try:
-            self._last_request_time = time.time()
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-        except _API_ERRORS as e:
-            raise VariantError(f"dbSNP ESummary failed: {e}") from e
+        data = self._eutils_get(
+            "esummary.fcgi",
+            {"db": "snp", "id": ",".join(ids), "retmode": "json"},
+            "dbSNP ESummary failed",
+        )
 
         result_list = data.get("result", [])
         variants: list[Variant] = []
@@ -476,7 +491,7 @@ def _parse_spdi(spdi: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
-class ClinVarClient:
+class ClinVarClient(_EUtilsClient):
     """Client for fetching pathogenic variants from ClinVar via E-utilities.
 
     Queries NCBI ClinVar for variants with clinical significance
@@ -489,19 +504,9 @@ class ClinVarClient:
     api_key : str, optional
         NCBI API key for higher rate limits.
     rate_limit : float
-        Minimum seconds between requests.
+        Minimum seconds between requests (default 0.1 with API key,
+        0.34 without).
     """
-
-    def __init__(
-        self,
-        email: str = "",
-        api_key: str | None = None,
-        rate_limit: float | None = None,
-    ):
-        self.email = email
-        self.api_key = api_key
-        self.rate_limit = rate_limit or (0.1 if api_key else 0.34)
-        self._last_request_time: float = 0.0
 
     def fetch_pathogenic_variants(
         self,
@@ -530,37 +535,22 @@ class ClinVarClient:
         VariantError
             If the API request fails.
         """
-        # Rate limiting
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self.rate_limit:
-            time.sleep(self.rate_limit - elapsed)
-
         # ESearch: find ClinVar records for pathogenic variants in gene
         search_term = (
             f"{gene_name}[Gene] AND {organism}[Organism] "
             f'AND ("pathogenic"[Clinical_Significance] '
             f'OR "likely pathogenic"[Clinical_Significance])'
         )
-        params = {
-            "db": "clinvar",
-            "term": search_term,
-            "retmax": str(max_results),
-            "retmode": "json",
-        }
-        if self.email:
-            params["email"] = self.email
-        if self.api_key:
-            params["api_key"] = self.api_key
-
-        url = f"{_EUTILS_URL}/esearch.fcgi?" + urllib.parse.urlencode(params)
-
-        try:
-            self._last_request_time = time.time()
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-        except _API_ERRORS as e:
-            raise VariantError(f"ClinVar ESearch failed for gene {gene_name}: {e}") from e
+        data = self._eutils_get(
+            "esearch.fcgi",
+            {
+                "db": "clinvar",
+                "term": search_term,
+                "retmax": str(max_results),
+                "retmode": "json",
+            },
+            f"ClinVar ESearch failed for gene {gene_name}",
+        )
 
         ids = data.get("esearchresult", {}).get("idlist", [])
         if not ids:
@@ -578,29 +568,11 @@ class ClinVarClient:
 
     def _fetch_clinvar_summaries(self, ids: list[str]) -> list[Variant]:
         """Fetch ClinVar variant summaries from ESummary."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self.rate_limit:
-            time.sleep(self.rate_limit - elapsed)
-
-        params = {
-            "db": "clinvar",
-            "id": ",".join(ids),
-            "retmode": "json",
-        }
-        if self.email:
-            params["email"] = self.email
-        if self.api_key:
-            params["api_key"] = self.api_key
-
-        url = f"{_EUTILS_URL}/esummary.fcgi?" + urllib.parse.urlencode(params)
-
-        try:
-            self._last_request_time = time.time()
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-        except _API_ERRORS as e:
-            raise VariantError(f"ClinVar ESummary failed: {e}") from e
+        data = self._eutils_get(
+            "esummary.fcgi",
+            {"db": "clinvar", "id": ",".join(ids), "retmode": "json"},
+            "ClinVar ESummary failed",
+        )
 
         result_list = data.get("result", [])
         variants: list[Variant] = []
