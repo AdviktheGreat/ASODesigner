@@ -538,6 +538,11 @@ class TestGenerateReport:
                     "chemistry_bonus": 0.0,
                     "final_score": 0.75,
                     "component_scores": {"gc_content": 0.8, "accessibility": 0.6},
+                    "features": {
+                        "cpg_count": 2,
+                        "g_quadruplex_motifs": 0,
+                        "motif_risk": "moderate",
+                    },
                 },
                 {
                     "rank": 2,
@@ -560,7 +565,8 @@ class TestGenerateReport:
 
         lines = paths["csv"].read_text().strip().splitlines()
         header = lines[0].split(",")
-        # Fixed core columns plus the union of component columns, sorted.
+        # Fixed core columns, then the union of component columns (sorted),
+        # then the fixed motif-screen columns.
         assert header[:8] == [
             "rank",
             "sequence",
@@ -571,14 +577,17 @@ class TestGenerateReport:
             "chemistry_bonus",
             "final_score",
         ]
-        assert header[8:] == ["accessibility", "gc_content"]
+        assert header[8:10] == ["accessibility", "gc_content"]
+        assert header[10:] == ["cpg_count", "g_quadruplex_motifs", "motif_risk"]
         row1 = lines[1].split(",")
         assert row1[0] == "1"
         assert row1[1] == "ATGCATGCATGCATGCATGC"
         assert row1[8] == "0.6"  # accessibility present in row 1
+        assert row1[10:] == ["2", "0", "moderate"]  # motif features present
         row2 = lines[2].split(",")
         assert row2[8] == ""  # accessibility missing in row 2
         assert row2[9] == "0.9"
+        assert row2[10:] == ["", "", ""]  # motif features missing
 
     def test_csv_empty_candidates(self, tmp_path):
         r = ReportData(summary=ReportSummary(target_name="X"), candidates=[])

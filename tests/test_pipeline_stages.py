@@ -93,6 +93,22 @@ class TestStageGenerate:
             assert got.region == want.region
             assert got.features["transcript_length"] == len(pipeline._transcript.sequence)
 
+    def test_generate_seeds_motif_features(self):
+        """Every generated candidate gets motif-screen features."""
+        from aso_designer.motifs import assess_motifs
+
+        pipeline = make_pipeline()
+        pipeline._stage_generate()
+
+        assert pipeline._candidates
+        for c in pipeline._candidates:
+            expected = assess_motifs(c.sequence)
+            assert c.features["cpg_count"] == expected.cpg_count
+            assert c.features["cpg_fraction"] == round(expected.cpg_fraction, 4)
+            assert c.features["g_quadruplex_motifs"] == expected.g_quadruplex_motifs
+            assert c.features["motif_risk"] == expected.risk_label()
+            assert c.features["motif_risk"] in ("low", "moderate", "elevated")
+
     def test_batched_generation_equals_direct(self):
         """Flattened batches equal the one-shot generator, any batch size."""
         from aso_designer.candidate_generator import (

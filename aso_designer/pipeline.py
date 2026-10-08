@@ -346,8 +346,13 @@ class ASOPipeline:
         Uses the memory-managed batched generator so very long
         transcripts (e.g. DMD at ~14 kb) do not require the full
         candidate list to be materialized at once during generation.
+
+        Each candidate is also screened for immunostimulatory motifs
+        (CpG content, TLR9-stimulatory hexamers, G-quadruplex-prone
+        runs) and the counts are stored as features.
         """
         from aso_designer.candidate_generator import generate_candidates_batched
+        from aso_designer.motifs import assess_motifs
         from aso_designer.quality import extract_metadata
 
         if self._transcript is None:
@@ -363,6 +368,11 @@ class ASOPipeline:
         ):
             for candidate in batch:
                 candidate.features["transcript_length"] = transcript_length
+                motifs = assess_motifs(candidate.sequence)
+                candidate.features["cpg_count"] = motifs.cpg_count
+                candidate.features["cpg_fraction"] = round(motifs.cpg_fraction, 4)
+                candidate.features["g_quadruplex_motifs"] = motifs.g_quadruplex_motifs
+                candidate.features["motif_risk"] = motifs.risk_label()
             self._candidates.extend(batch)
         self.result.total_candidates = len(self._candidates)
         logger.info("Generated %d candidates", self.result.total_candidates)

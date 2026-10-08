@@ -663,7 +663,7 @@ def _generate_candidate_table(candidates: list[dict[str, Any]]) -> str:
         "<th>Chemistry</th><th>Final Score</th>"
         "<th>Accessibility</th><th>Thermo</th><th>GC</th>"
         "<th>Off-Target</th><th>Variant</th><th>Self-Struct</th>"
-        "<th>Position</th></tr>",
+        "<th>Position</th><th>Motifs</th></tr>",
     ]
     for c in candidates:
         rank = c.get("rank", "-")
@@ -673,6 +673,7 @@ def _generate_candidate_table(candidates: list[dict[str, Any]]) -> str:
         chem = c.get("chemistry", "")
         final = c.get("final_score", 0.0)
         comp = c.get("component_scores", {})
+        motif_risk = c.get("features", {}).get("motif_risk") or "N/A"
 
         def _comp_score(key: str, comp_dict: dict = comp) -> str:
             v = comp_dict.get(key)
@@ -688,7 +689,8 @@ def _generate_candidate_table(candidates: list[dict[str, Any]]) -> str:
             f"<td>{_comp_score('off_target')}</td>"
             f"<td>{_comp_score('variant')}</td>"
             f"<td>{_comp_score('self_structure')}</td>"
-            f"<td>{_comp_score('positional')}</td></tr>"
+            f"<td>{_comp_score('positional')}</td>"
+            f"<td>{motif_risk}</td></tr>"
         )
     parts.append("</table>")
     return "\n".join(parts)
@@ -855,7 +857,8 @@ def _generate_score_distribution_chart(
 # ---------------------------------------------------------------------------
 
 # Fixed core columns for candidate CSV exports. Component-score columns
-# are appended dynamically from the candidates' component_scores maps.
+# are appended dynamically from the candidates' component_scores maps,
+# followed by motif-screen columns read from the candidates' features.
 _CSV_CORE_COLUMNS = (
     "rank",
     "sequence",
@@ -867,14 +870,20 @@ _CSV_CORE_COLUMNS = (
     "final_score",
 )
 
+_CSV_FEATURE_COLUMNS = (
+    "cpg_count",
+    "g_quadruplex_motifs",
+    "motif_risk",
+)
+
 
 def export_candidates_csv(candidates: list[dict[str, Any]], output_path: str | Path) -> Path:
     """Export ranked candidates as a CSV table.
 
     Each row is one candidate. In addition to the fixed core columns,
     one column per scoring component is emitted (union across rows,
-    sorted alphabetically); candidates missing a component get an empty
-    cell.
+    sorted alphabetically), followed by the motif-screen columns read
+    from each candidate's features; missing values become empty cells.
 
     Parameters
     ----------
@@ -901,17 +910,20 @@ def export_candidates_csv(candidates: list[dict[str, Any]], output_path: str | P
                 component_columns.append(key)
     component_columns.sort()
 
-    columns = list(_CSV_CORE_COLUMNS) + component_columns
+    columns = list(_CSV_CORE_COLUMNS) + component_columns + list(_CSV_FEATURE_COLUMNS)
 
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(columns)
         for row in candidates:
             components = row.get("component_scores", {})
+            features = row.get("features", {})
             record = []
             for col in columns:
                 if col in _CSV_CORE_COLUMNS:
                     value = row.get(col, "")
+                elif col in _CSV_FEATURE_COLUMNS:
+                    value = features.get(col, "")
                 else:
                     value = components.get(col, "")
                 record.append(value)

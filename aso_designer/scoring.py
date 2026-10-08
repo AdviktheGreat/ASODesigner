@@ -12,8 +12,8 @@ transparent weight documentation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
 from aso_designer.utils.exceptions import ScoringError
 from aso_designer.utils.logger import get_logger
@@ -383,6 +383,7 @@ class CandidateScore:
     composite_score: CompositeScore
     final_score: float
     rank: int | None = None
+    features: dict[str, Any] = field(default_factory=dict)
 
     @property
     def component_scores(self) -> dict[str, float]:
@@ -404,6 +405,7 @@ class CandidateScore:
             },
             "composite_score": round(self.composite_score.composite_score, 4),
             "chemistry_bonus": self.composite_score.chemistry_bonus,
+            "features": dict(self.features),
         }
 
 
@@ -685,6 +687,7 @@ def score_candidate(
         chemistry=candidate.chemistry,
         composite_score=composite,
         final_score=composite.final_score,
+        features=dict(features),
     )
 
 

@@ -612,6 +612,36 @@ class TestScoreCandidate:
         assert d["end"] == 4
         assert "final_score" in d
         assert "component_scores" in d
+        assert d["features"] == {}
+
+    def test_features_carried_on_score(self):
+        """score_candidate copies the feature dict onto the scored row."""
+        cand = ASOCandidate(
+            sequence="ATGCATGCATGCATGCATGC",
+            start=0,
+            end=20,
+            length=20,
+            gc_content=0.5,
+            region="CDS",
+        )
+        features = {"cpg_count": 3, "motif_risk": "moderate"}
+        result = score_candidate(cand, features)
+        assert result.features == {"cpg_count": 3, "motif_risk": "moderate"}
+        assert result.to_dict()["features"] == {"cpg_count": 3, "motif_risk": "moderate"}
+
+    def test_features_dict_is_isolated(self):
+        """Mutating the input features dict later must not affect the score."""
+        cand = ASOCandidate(
+            sequence="ATGC",
+            start=0,
+            end=4,
+            length=4,
+            gc_content=0.5,
+        )
+        features = {"cpg_count": 1}
+        result = score_candidate(cand, features)
+        features["cpg_count"] = 99
+        assert result.features["cpg_count"] == 1
 
 
 # ---------------------------------------------------------------------------
