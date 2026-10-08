@@ -921,6 +921,51 @@ def export_candidates_csv(candidates: list[dict[str, Any]], output_path: str | P
     return output_path
 
 
+def export_candidates_fasta(candidates: list[dict[str, Any]], output_path: str | Path) -> Path:
+    """Export candidates as FASTA (for oligo ordering / downstream tools).
+
+    Each record's header carries the candidate index (guaranteed unique)
+    plus position, chemistry, rank, and score when available:
+
+        >aso_1 rank=1 start=10 end=30 chemistry=gapmer score=0.7521
+        ATGCATGCATGCATGCATGC
+
+    Parameters
+    ----------
+    candidates : list[dict]
+        Ranked candidate dictionaries (``CandidateScore.to_dict()`` rows,
+        as stored in ``ReportData.candidates``).
+    output_path : str or Path
+        Destination FASTA file. Parent directories are created.
+
+    Returns
+    -------
+    Path
+        The path written.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines: list[str] = []
+    for i, row in enumerate(candidates, start=1):
+        fields = [f"aso_{i}"]
+        if row.get("rank") is not None:
+            fields.append(f"rank={row['rank']}")
+        fields.append(f"start={row.get('start', '')}")
+        fields.append(f"end={row.get('end', '')}")
+        fields.append(f"chemistry={row.get('chemistry', '')}")
+        if row.get("final_score") is not None:
+            fields.append(f"score={row['final_score']:.4f}")
+        lines.append(">".join(["", " ".join(fields)]))
+        lines.append(row.get("sequence", ""))
+
+    with open(output_path, "w") as f:
+        f.write("\n".join(lines) + "\n" if lines else "")
+
+    logger.info("Exported %d candidates to %s", len(candidates), output_path)
+    return output_path
+
+
 # ---------------------------------------------------------------------------
 # Combined report generation
 # ---------------------------------------------------------------------------
@@ -933,6 +978,7 @@ def generate_report(
     generate_json: bool = True,
     generate_html: bool = True,
     generate_csv: bool = False,
+    generate_fasta: bool = False,
     title: str = "ASODesigner Report",
 ) -> dict[str, Path]:
     """Generate reports from ReportData.
@@ -951,13 +997,16 @@ def generate_report(
         Write HTML report (default True).
     generate_csv : bool
         Write a CSV table of the ranked candidates (default False).
+    generate_fasta : bool
+        Write a FASTA file of the candidate sequences for oligo
+        ordering (default False).
     title : str
         HTML page title.
 
     Returns
     -------
     dict[str, Path]
-        Maps format ('json', 'html', 'csv') to output file path.
+        Maps format ('json', 'html', 'csv', 'fasta') to output file path.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -976,6 +1025,10 @@ def generate_report(
         csv_path = output_dir / f"{basename}.csv"
         paths["csv"] = export_candidates_csv(report.candidates, csv_path)
 
+    if generate_fasta:
+        fasta_path = output_dir / f"{basename}_candidates.fasta"
+        paths["fasta"] = export_candidates_fasta(report.candidates, fasta_path)
+
     logger.info("Reports generated in %s: %s", output_dir, list(paths.keys()))
     return paths
 
@@ -992,6 +1045,7 @@ def generate_report_from_ranking(
     generate_json: bool = True,
     generate_html: bool = True,
     generate_csv: bool = False,
+    generate_fasta: bool = False,
     thermodynamic_summaries: list | None = None,
     off_target_results: list | None = None,
     variant_annotations: list | None = None,
@@ -1059,6 +1113,7 @@ def generate_report_from_ranking(
         generate_json=generate_json,
         generate_html=generate_html,
         generate_csv=generate_csv,
+        generate_fasta=generate_fasta,
     )
 
 
@@ -1210,6 +1265,7 @@ def assemble_report(
     generate_json: bool = True,
     generate_html: bool = True,
     generate_csv: bool = False,
+    generate_fasta: bool = False,
     include_thermo: bool = True,
     include_offtarget: bool = True,
     include_variant: bool = True,
@@ -1284,6 +1340,7 @@ def assemble_report(
         generate_json=generate_json,
         generate_html=generate_html,
         generate_csv=generate_csv,
+        generate_fasta=generate_fasta,
     )
 
 

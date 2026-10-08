@@ -588,6 +588,48 @@ class TestGenerateReport:
         lines = paths["csv"].read_text().strip().splitlines()
         assert len(lines) == 1  # header only
 
+    def test_fasta_export(self, tmp_path):
+        r = ReportData(
+            summary=ReportSummary(target_name="BRCA1"),
+            candidates=[
+                {
+                    "rank": 1,
+                    "sequence": "ATGCATGCATGCATGCATGC",
+                    "start": 10,
+                    "end": 30,
+                    "chemistry": "gapmer",
+                    "final_score": 0.75,
+                },
+                {
+                    "sequence": "GCGCGCGCGCGCGCGCGCGC",
+                    "start": 40,
+                    "end": 60,
+                    "chemistry": "2ome",
+                },
+            ],
+        )
+        paths = generate_report(
+            r, tmp_path, basename="fa", generate_html=False, generate_fasta=True
+        )
+        assert "fasta" in paths
+        text = paths["fasta"].read_text()
+        blocks = text.strip().split(">")
+        assert blocks[0] == ""
+        first = blocks[1].splitlines()
+        assert first[0].startswith("aso_1 rank=1 start=10 end=30 chemistry=gapmer score=0.7500")
+        assert first[1] == "ATGCATGCATGCATGCATGC"
+        second = blocks[2].splitlines()
+        # Unranked candidate: unique index id, no rank/score fields.
+        assert second[0].startswith("aso_2 start=40 end=60 chemistry=2ome")
+        assert "score=" not in second[0]
+
+    def test_fasta_empty_candidates(self, tmp_path):
+        r = ReportData(summary=ReportSummary(target_name="X"), candidates=[])
+        paths = generate_report(
+            r, tmp_path, basename="nofa", generate_html=False, generate_fasta=True
+        )
+        assert paths["fasta"].read_text() == ""
+
 
 # ---------------------------------------------------------------------------
 # generate_report_from_ranking

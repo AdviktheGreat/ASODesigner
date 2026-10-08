@@ -274,6 +274,27 @@ class TestPipelineConfig:
         del args.csv
         assert PipelineConfig.from_args(args).generate_csv is False
 
+    def test_from_args_fasta_flag(self):
+        """--export-fasta maps to PipelineConfig.generate_fasta."""
+        import argparse
+
+        args = argparse.Namespace(
+            target="BRCA1",
+            chemistry="gapmer",
+            config=None,
+            local_fasta=None,
+            output_dir="out",
+            top_n=None,
+            min_score=0.0,
+            no_offtarget=False,
+            no_variant=False,
+            no_html=False,
+            export_fasta=True,
+        )
+        assert PipelineConfig.from_args(args).generate_fasta is True
+        del args.export_fasta
+        assert PipelineConfig.from_args(args).generate_fasta is False
+
     def test_design_parser_accepts_transcriptome_and_vcf(self):
         """The design subparser accepts --transcriptome and --vcf."""
         parser = build_parser()
@@ -869,6 +890,75 @@ class TestCliHandlersInProcess:
         )
         assert rc == 0
         assert os.path.exists(os.path.join(report_dir, "csvrep.csv"))
+
+    def test_design_fasta_export(self, tmp_path, capsys):
+        """`design --export-fasta` writes a candidate FASTA next to reports."""
+        fasta_path = _write_test_fasta(str(tmp_path / "t.fasta"), seq_id="NM_FA_1")
+        output_dir = str(tmp_path / "out")
+        rc = main(
+            [
+                "design",
+                "--target",
+                "NM_FA_1",
+                "--local-fasta",
+                fasta_path,
+                "--output-dir",
+                output_dir,
+                "--top-n",
+                "3",
+                "--no-offtarget",
+                "--no-variant",
+                "--export-fasta",
+                "--quiet",
+            ]
+        )
+        assert rc == 0
+        fa_path = os.path.join(output_dir, "NM_FA_1_report_candidates.fasta")
+        assert os.path.exists(fa_path)
+        with open(fa_path) as f:
+            text = f.read()
+        assert text.count(">") == 3
+        assert "aso_1" in text
+        seq_lines = [line for line in text.splitlines() if line and not line.startswith(">")]
+        assert len(seq_lines) == 3
+        assert all(set(seq) <= set("ACGT") for seq in seq_lines)
+
+    def test_report_fasta_export(self, tmp_path, capsys):
+        """`report --export-fasta` writes a candidate FASTA."""
+        fasta_path = _write_test_fasta(str(tmp_path / "t.fasta"), seq_id="NM_FA_2")
+        design_dir = str(tmp_path / "design")
+        main(
+            [
+                "design",
+                "--target",
+                "NM_FA_2",
+                "--local-fasta",
+                fasta_path,
+                "--output-dir",
+                design_dir,
+                "--no-offtarget",
+                "--no-variant",
+                "--quiet",
+            ]
+        )
+        design_json = os.path.join(design_dir, "NM_FA_2_report.json")
+        report_dir = str(tmp_path / "reports")
+        rc = main(
+            [
+                "report",
+                "--results",
+                design_json,
+                "--output-dir",
+                report_dir,
+                "--basename",
+                "farep",
+                "--no-html",
+                "--export-fasta",
+                "--quiet",
+            ]
+        )
+        assert rc == 0
+        assert os.path.exists(os.path.join(report_dir, "farep_candidates.fasta"))
 
     def test_report_missing_file(self, capsys):
         rc = main(["report", "--results", "/nonexistent/results.json", "--quiet"])

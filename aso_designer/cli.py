@@ -174,6 +174,11 @@ def _add_design_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Also write a CSV table of the ranked candidates.",
     )
     parser.add_argument(
+        "--export-fasta",
+        action="store_true",
+        help="Also write a FASTA file of the candidate sequences.",
+    )
+    parser.add_argument(
         "--no-offtarget",
         action="store_true",
         help="Skip off-target analysis (faster but less specific).",
@@ -261,6 +266,11 @@ def _add_report_subparser(subparsers: argparse._SubParsersAction) -> None:
         "--csv",
         action="store_true",
         help="Also write a CSV table of the ranked candidates.",
+    )
+    parser.add_argument(
+        "--export-fasta",
+        action="store_true",
+        help="Also write a FASTA file of the candidate sequences.",
     )
 
 
@@ -769,6 +779,7 @@ def _handle_report(args: argparse.Namespace) -> int:
         basename=args.basename,
         generate_html=not args.no_html,
         generate_csv=getattr(args, "csv", False),
+        generate_fasta=getattr(args, "export_fasta", False),
     )
 
     print()

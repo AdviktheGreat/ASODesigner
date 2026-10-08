@@ -72,6 +72,8 @@ class PipelineConfig:
         Generate HTML report (default True).
     generate_csv : bool
         Also write a CSV table of the ranked candidates (default False).
+    generate_fasta : bool
+        Also write a FASTA file of the candidate sequences (default False).
     """
 
     target: str = ""
@@ -90,6 +92,7 @@ class PipelineConfig:
     run_variant: bool = True
     generate_html: bool = True
     generate_csv: bool = False
+    generate_fasta: bool = False
 
     @classmethod
     def from_args(cls, args: Any) -> PipelineConfig:
@@ -119,6 +122,7 @@ class PipelineConfig:
             run_variant=not getattr(args, "no_variant", False),
             generate_html=not getattr(args, "no_html", False),
             generate_csv=getattr(args, "csv", False),
+            generate_fasta=getattr(args, "export_fasta", False),
         )
 
 
@@ -757,6 +761,7 @@ class ASOPipeline:
             basename=f"{self.config.target}_report",
             generate_html=self.config.generate_html,
             generate_csv=self.config.generate_csv,
+            generate_fasta=self.config.generate_fasta,
         )
         self.result.report_paths = {k: str(v) for k, v in paths.items()}
         logger.info("Reports generated: %s", list(paths.keys()))
@@ -783,6 +788,7 @@ def run_pipeline(
     run_variant: bool = True,
     generate_html: bool = True,
     generate_csv: bool = False,
+    generate_fasta: bool = False,
     organism: str = "Homo sapiens",
 ) -> PipelineResult:
     """Run the full ASO design pipeline in one call.
@@ -819,6 +825,8 @@ def run_pipeline(
         Generate HTML report.
     generate_csv : bool
         Also write a CSV table of the ranked candidates.
+    generate_fasta : bool
+        Also write a FASTA file of the candidate sequences.
     organism : str
         Organism for NCBI lookup.
 
@@ -844,6 +852,7 @@ def run_pipeline(
         run_variant=run_variant,
         generate_html=generate_html,
         generate_csv=generate_csv,
+        generate_fasta=generate_fasta,
     )
     pipeline = ASOPipeline(config)
     return pipeline.run()
