@@ -44,12 +44,25 @@ All notable changes to ASODesigner are documented in this file.
 - Memory-managed batched candidate generation in the pipeline stage.
 - Off-target verification now pre-filters candidates by seed-region
   mismatches and uses early-terminating Hamming distance.
+- Immunostimulatory-motif screening during candidate generation
+  (new `aso_designer.motifs` module): CpG count/fraction, canonical
+  TLR9-stimulatory hexamers, G-quadruplex-prone motifs, and a coarse
+  risk label stored as candidate features and surfaced in the JSON/
+  HTML reports, CSV export, and a new HTML table column.
+- Candidate exports alongside the JSON/HTML reports: `--csv` writes
+  `{basename}_candidates.csv` (core columns, per-component scores,
+  motif columns) and `--export-fasta` writes `{basename}_candidates.
+  fasta` (ordered-oligo-style records with position/chemistry/rank/
+  score headers).
 
 ### Tests
 
-- Grew from 602 to 768 tests; overall coverage rose from 86% to 95%
+- Grew from 602 to 814 tests; overall coverage rose from 86% to 95%
   (CLI 39% → 93%, variant 78% → 96%, transcript fetching 68% → 96%,
   fetch manager 100%).
+- Full motif-screening test suite (CpG, TLR9 hexamers, G-quadruplex
+  detection, risk labels); feature-carrying `CandidateScore` tests;
+  pipeline motif-seeding test; CSV motif-column tests.
 - In-process CLI handler tests covering all four subcommands
   (score, report, info, design) including error paths.
 - dbSNP/ClinVar summary-parsing tests with realistic E-utilities

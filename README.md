@@ -43,9 +43,11 @@ candidate scoring.
   pathogenic variants from dbSNP/ClinVar APIs or user-provided VCF files.
 - **Interpretable scoring** — transparent, multi-factor candidate ranking
   with 7 score components, documented weights, and chemistry-aware bonuses.
+- **Motif screening** — flags immunostimulatory motifs (CpG content,
+  canonical TLR9 hexamers) and G-quadruplex-prone runs per candidate.
 - **Reporting** — structured JSON and self-contained HTML reports with
   summary statistics, score distribution charts, and per-candidate detail
-  tables.
+  tables; optional CSV and FASTA exports for candidates.
 
 ## Installation
 
@@ -258,7 +260,7 @@ pytest --cov=aso_designer
 pytest tests/test_scoring.py -v
 ```
 
-The test suite includes 760+ tests covering all modules, with mocked
+The test suite includes 810+ tests covering all modules, with mocked
 ViennaRNA and NCBI calls for reproducibility.
 
 ## Programmatic Usage

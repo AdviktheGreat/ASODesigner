@@ -50,6 +50,11 @@ Each window becomes an `ASOCandidate` with:
 - Region annotation (5UTR, CDS, 3UTR) if transcript metadata is available
 - Chemistry type (gapmer, mixmer, 2'-OMe, MOE, morpholino)
 
+Each candidate is also screened for immunostimulatory motifs (see
+[Motif screening](#motif-screening) below); the counts are stored in
+the candidate's features dict and carried through scoring into the
+reports.
+
 ### 3. Pre-filters
 
 Candidates are screened by four filters before expensive feature
@@ -98,12 +103,63 @@ See [Scoring Methodology](#scoring) below for details.
 The pipeline generates two report formats:
 
 - **JSON** — Structured, machine-readable report with summary
-  statistics, candidate details, and optional detail sections
+  statistics, candidate details (including motif-screen features),
+  and optional detail sections
 - **HTML** — Self-contained (no external dependencies) report with
-  embedded CSS, summary cards, candidate table with score bars,
-  SVG score distribution chart, and detail tables
+  embedded CSS, summary cards, candidate table with score bars and a
+  motif-risk column, SVG score distribution chart, and detail tables
+
+Optional exports:
+
+- **CSV** (`--csv`) — Ranked candidates as a table: core columns,
+  one column per scoring component, and motif-screen columns
+- **FASTA** (`--export-fasta`) — Candidate sequences as FASTA records
+  with position/chemistry/rank/score in the headers, suitable for
+  oligo ordering and downstream tools
 
 Reports are written to a configurable output directory.
+
+## Motif screening
+
+During candidate generation every sequence is screened for motifs
+associated with innate-immune stimulation or non-canonical structure
+formation. These are heuristic sequence counts used to surface risk
+signals — they are not immunogenicity or structure predictions, and
+they do not affect scores or filtering. They are stored as candidate
+features (`cpg_count`, `cpg_fraction`, `g_quadruplex_motifs`,
+`motif_risk`) and appear in the JSON/HTML reports and CSV export.
+
+### CpG content and TLR9 motifs
+
+Unmethylated CpG dinucleotides can stimulate innate immunity through
+Toll-like receptor 9 (TLR9). The screen reports:
+
+- `cpg_count` — number of CpG (CG) dinucleotides
+- `cpg_fraction` — CpG count divided by the number of dinucleotide
+  positions
+- `tlr9_stimulatory` — presence of a canonical TLR9-stimulatory
+  hexamer: `TCGTCG` (human-type) or `GTCGTT` (mouse-type)
+  (Krieg et al. 1995, Nature 374:546-549)
+
+Note that the CpG methylation state and flanking context, which
+strongly modulate the TLR9 response, are not modeled.
+
+### G-quadruplex-prone motifs
+
+Four runs of at least three guanines separated by 1–7 nt
+(`GGG N1-7 GGG N1-7 GGG N1-7 GGG`) can fold into G-quadruplex
+structures, which may affect hybridization behavior. The screen
+reports the number of such motifs (`g_quadruplex_motifs`) and the
+longest consecutive guanine run (`longest_g_run` in the module API).
+
+### Risk labels
+
+The coarse `motif_risk` label combines the signals:
+
+- **elevated** — contains a canonical TLR9 motif or a
+  G-quadruplex-prone motif
+- **moderate** — CpG-rich (fraction above 0.10) but no flagged motif
+- **low** — everything else
 
 ## Thermodynamics
 

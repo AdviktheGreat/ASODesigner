@@ -13,6 +13,7 @@ Module-by-module API reference for ASODesigner.
   - [aso_designer.viennarna](#aso_designerviennarna)
   - [aso_designer.accessibility](#aso_designeraccessibility)
   - [aso_designer.thermodynamics](#aso_designerthermodynamics)
+  - [aso_designer.motifs](#aso_designermotifs)
 - [Off-target & Variant](#off-target--variant)
   - [aso_designer.off_target](#aso_designeroff_target)
   - [aso_designer.variant](#aso_designervariant)
@@ -167,6 +168,28 @@ print(f"ΔG = {dg.dg:.2f} kcal/mol")
 
 ---
 
+### aso_designer.motifs
+
+Immunostimulatory-motif and G-quadruplex screening. Heuristic sequence
+counts, not immunogenicity predictions.
+
+```python
+from aso_designer.motifs import assess_motifs
+
+report = assess_motifs("TCGTCGATGCATGCATGCAT")
+print(report.cpg_count)             # CpG dinucleotide count
+print(report.tlr9_stimulatory)      # canonical TLR9 hexamer present?
+print(report.g_quadruplex_motifs)   # G-quadruplex-prone motifs
+print(report.risk_label())          # "low" / "moderate" / "elevated"
+```
+
+**Classes:** `MotifReport`.
+
+**Functions:** `assess_motifs()`, `cpg_count()`, `cpg_fraction()`,
+`find_g_quadruplex_motifs()`, `longest_g_run()`.
+
+---
+
 ## Off-target & Variant
 
 ### aso_designer.off_target
@@ -266,7 +289,8 @@ print(paths)  # {"json": Path, "html": Path}
 **Functions:** `generate_json_report()`, `load_json_report()`,
 `generate_html_report()`, `generate_report()`, `build_report_data()`,
 `assemble_report()`, `assemble_report_from_config()`,
-`generate_report_from_ranking()`, `generate_reports_batch()`.
+`generate_report_from_ranking()`, `generate_reports_batch()`,
+`export_candidates_csv()`, `export_candidates_fasta()`.
 
 ---
 

@@ -49,6 +49,10 @@ Common:
   --output-dir DIR         Output directory for reports (default: results)
   --top-n N                Keep only the top N candidates
   --min-score SCORE        Minimum score threshold (default: 0.0)
+  --csv                    Also export ranked candidates as CSV
+                           ({basename}_candidates.csv)
+  --export-fasta           Also export candidate sequences as FASTA
+                           ({basename}_candidates.fasta)
   --no-html                Skip HTML report generation
   --no-offtarget           Skip off-target analysis
   --no-variant             Skip variant/SNP annotation
@@ -135,6 +139,10 @@ Required:
 Common:
   --output-dir DIR         Output directory (default: reports)
   --basename NAME          Base filename (default: aso_report)
+  --csv                    Also export ranked candidates as CSV
+                           ({basename}_candidates.csv)
+  --export-fasta           Also export candidate sequences as FASTA
+                           ({basename}_candidates.fasta)
   --no-html                Skip HTML report generation
   --config PATH            YAML config file
   --chemistry CHEM         ASO chemistry
@@ -164,13 +172,21 @@ asodesigner info --chemistry mixmer --show-weights --show-presets
 
 ## Output files
 
-The `design` and `report` commands generate two files in the output
-directory:
+The `design` and `report` commands always generate two files in the
+output directory:
 
 - `{basename}.json` — Machine-readable JSON report with summary,
-  candidates, and optional detail sections
+  candidates (including motif-screen features), and optional detail
+  sections
 - `{basename}.html` — Self-contained HTML report with embedded CSS,
   summary cards, score distribution chart, and candidate table
+
+Optional exports (enabled with `--csv` / `--export-fasta`):
+
+- `{basename}_candidates.csv` — Ranked candidates as a table (core
+  columns, per-component scores, and motif-screen columns)
+- `{basename}_candidates.fasta` — Candidate sequences as FASTA records
+  (for oligo ordering / downstream tools)
 
 The `basename` defaults to `{target}_report` for the `design` command
 and `aso_report` for the `report` command.
