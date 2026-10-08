@@ -169,6 +169,11 @@ def _add_design_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Skip HTML report generation.",
     )
     parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="Also write a CSV table of the ranked candidates.",
+    )
+    parser.add_argument(
         "--no-offtarget",
         action="store_true",
         help="Skip off-target analysis (faster but less specific).",
@@ -251,6 +256,11 @@ def _add_report_subparser(subparsers: argparse._SubParsersAction) -> None:
         "--no-html",
         action="store_true",
         help="Skip HTML report generation.",
+    )
+    parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="Also write a CSV table of the ranked candidates.",
     )
 
 
@@ -758,6 +768,7 @@ def _handle_report(args: argparse.Namespace) -> int:
         output_dir,
         basename=args.basename,
         generate_html=not args.no_html,
+        generate_csv=getattr(args, "csv", False),
     )
 
     print()

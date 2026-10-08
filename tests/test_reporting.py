@@ -524,6 +524,70 @@ class TestGenerateReport:
         assert "html" in paths
         assert "json" not in paths
 
+    def test_csv_export(self, tmp_path):
+        r = ReportData(
+            summary=ReportSummary(target_name="BRCA1"),
+            candidates=[
+                {
+                    "rank": 1,
+                    "sequence": "ATGCATGCATGCATGCATGC",
+                    "start": 10,
+                    "end": 30,
+                    "chemistry": "gapmer",
+                    "composite_score": 0.75,
+                    "chemistry_bonus": 0.0,
+                    "final_score": 0.75,
+                    "component_scores": {"gc_content": 0.8, "accessibility": 0.6},
+                },
+                {
+                    "rank": 2,
+                    "sequence": "GCGCGCGCGCGCGCGCGCGC",
+                    "start": 40,
+                    "end": 60,
+                    "chemistry": "gapmer",
+                    "composite_score": 0.5,
+                    "chemistry_bonus": 0.1,
+                    "final_score": 0.6,
+                    "component_scores": {"gc_content": 0.9},
+                },
+            ],
+        )
+        paths = generate_report(
+            r, tmp_path, basename="csvout", generate_html=False, generate_csv=True
+        )
+        assert "csv" in paths
+        assert paths["csv"].exists()
+
+        lines = paths["csv"].read_text().strip().splitlines()
+        header = lines[0].split(",")
+        # Fixed core columns plus the union of component columns, sorted.
+        assert header[:8] == [
+            "rank",
+            "sequence",
+            "start",
+            "end",
+            "chemistry",
+            "composite_score",
+            "chemistry_bonus",
+            "final_score",
+        ]
+        assert header[8:] == ["accessibility", "gc_content"]
+        row1 = lines[1].split(",")
+        assert row1[0] == "1"
+        assert row1[1] == "ATGCATGCATGCATGCATGC"
+        assert row1[8] == "0.6"  # accessibility present in row 1
+        row2 = lines[2].split(",")
+        assert row2[8] == ""  # accessibility missing in row 2
+        assert row2[9] == "0.9"
+
+    def test_csv_empty_candidates(self, tmp_path):
+        r = ReportData(summary=ReportSummary(target_name="X"), candidates=[])
+        paths = generate_report(
+            r, tmp_path, basename="empty", generate_html=False, generate_csv=True
+        )
+        lines = paths["csv"].read_text().strip().splitlines()
+        assert len(lines) == 1  # header only
+
 
 # ---------------------------------------------------------------------------
 # generate_report_from_ranking

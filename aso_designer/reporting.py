@@ -15,6 +15,7 @@ Inspired by GuideX's reporting approach but redesigned with:
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -850,6 +851,77 @@ def _generate_score_distribution_chart(
 
 
 # ---------------------------------------------------------------------------
+# CSV export
+# ---------------------------------------------------------------------------
+
+# Fixed core columns for candidate CSV exports. Component-score columns
+# are appended dynamically from the candidates' component_scores maps.
+_CSV_CORE_COLUMNS = (
+    "rank",
+    "sequence",
+    "start",
+    "end",
+    "chemistry",
+    "composite_score",
+    "chemistry_bonus",
+    "final_score",
+)
+
+
+def export_candidates_csv(candidates: list[dict[str, Any]], output_path: str | Path) -> Path:
+    """Export ranked candidates as a CSV table.
+
+    Each row is one candidate. In addition to the fixed core columns,
+    one column per scoring component is emitted (union across rows,
+    sorted alphabetically); candidates missing a component get an empty
+    cell.
+
+    Parameters
+    ----------
+    candidates : list[dict]
+        Ranked candidate dictionaries (``CandidateScore.to_dict()`` rows,
+        as stored in ``ReportData.candidates``).
+    output_path : str or Path
+        Destination CSV file. Parent directories are created.
+
+    Returns
+    -------
+    Path
+        The path written.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    component_columns: list[str] = []
+    seen: set[str] = set()
+    for row in candidates:
+        for key in row.get("component_scores", {}):
+            if key not in seen:
+                seen.add(key)
+                component_columns.append(key)
+    component_columns.sort()
+
+    columns = list(_CSV_CORE_COLUMNS) + component_columns
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(columns)
+        for row in candidates:
+            components = row.get("component_scores", {})
+            record = []
+            for col in columns:
+                if col in _CSV_CORE_COLUMNS:
+                    value = row.get(col, "")
+                else:
+                    value = components.get(col, "")
+                record.append(value)
+            writer.writerow(record)
+
+    logger.info("Exported %d candidates to %s", len(candidates), output_path)
+    return output_path
+
+
+# ---------------------------------------------------------------------------
 # Combined report generation
 # ---------------------------------------------------------------------------
 
@@ -860,9 +932,10 @@ def generate_report(
     basename: str = "aso_report",
     generate_json: bool = True,
     generate_html: bool = True,
+    generate_csv: bool = False,
     title: str = "ASODesigner Report",
 ) -> dict[str, Path]:
-    """Generate both JSON and HTML reports from ReportData.
+    """Generate reports from ReportData.
 
     Parameters
     ----------
@@ -876,13 +949,15 @@ def generate_report(
         Write JSON report (default True).
     generate_html : bool
         Write HTML report (default True).
+    generate_csv : bool
+        Write a CSV table of the ranked candidates (default False).
     title : str
         HTML page title.
 
     Returns
     -------
     dict[str, Path]
-        Maps format ('json', 'html') to output file path.
+        Maps format ('json', 'html', 'csv') to output file path.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -896,6 +971,10 @@ def generate_report(
     if generate_html:
         html_path = output_dir / f"{basename}.html"
         paths["html"] = generate_html_report(report, html_path, title=title)
+
+    if generate_csv:
+        csv_path = output_dir / f"{basename}.csv"
+        paths["csv"] = export_candidates_csv(report.candidates, csv_path)
 
     logger.info("Reports generated in %s: %s", output_dir, list(paths.keys()))
     return paths
@@ -912,6 +991,7 @@ def generate_report_from_ranking(
     basename: str = "aso_report",
     generate_json: bool = True,
     generate_html: bool = True,
+    generate_csv: bool = False,
     thermodynamic_summaries: list | None = None,
     off_target_results: list | None = None,
     variant_annotations: list | None = None,
@@ -978,6 +1058,7 @@ def generate_report_from_ranking(
         basename=basename,
         generate_json=generate_json,
         generate_html=generate_html,
+        generate_csv=generate_csv,
     )
 
 
@@ -1128,6 +1209,7 @@ def assemble_report(
     basename: str = "aso_report",
     generate_json: bool = True,
     generate_html: bool = True,
+    generate_csv: bool = False,
     include_thermo: bool = True,
     include_offtarget: bool = True,
     include_variant: bool = True,
@@ -1201,6 +1283,7 @@ def assemble_report(
         basename=basename,
         generate_json=generate_json,
         generate_html=generate_html,
+        generate_csv=generate_csv,
     )
 
 

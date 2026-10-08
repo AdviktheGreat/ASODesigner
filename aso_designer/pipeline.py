@@ -70,6 +70,8 @@ class PipelineConfig:
         Run variant/SNP annotation (default True).
     generate_html : bool
         Generate HTML report (default True).
+    generate_csv : bool
+        Also write a CSV table of the ranked candidates (default False).
     """
 
     target: str = ""
@@ -87,6 +89,7 @@ class PipelineConfig:
     run_off_target: bool = True
     run_variant: bool = True
     generate_html: bool = True
+    generate_csv: bool = False
 
     @classmethod
     def from_args(cls, args: Any) -> PipelineConfig:
@@ -115,6 +118,7 @@ class PipelineConfig:
             run_off_target=not getattr(args, "no_offtarget", False),
             run_variant=not getattr(args, "no_variant", False),
             generate_html=not getattr(args, "no_html", False),
+            generate_csv=getattr(args, "csv", False),
         )
 
 
@@ -752,6 +756,7 @@ class ASOPipeline:
             metadata={"version": aso_designer.__version__, "stages_run": self.result.stages_run},
             basename=f"{self.config.target}_report",
             generate_html=self.config.generate_html,
+            generate_csv=self.config.generate_csv,
         )
         self.result.report_paths = {k: str(v) for k, v in paths.items()}
         logger.info("Reports generated: %s", list(paths.keys()))
@@ -777,6 +782,7 @@ def run_pipeline(
     run_off_target: bool = True,
     run_variant: bool = True,
     generate_html: bool = True,
+    generate_csv: bool = False,
     organism: str = "Homo sapiens",
 ) -> PipelineResult:
     """Run the full ASO design pipeline in one call.
@@ -811,6 +817,8 @@ def run_pipeline(
         Run variant annotation.
     generate_html : bool
         Generate HTML report.
+    generate_csv : bool
+        Also write a CSV table of the ranked candidates.
     organism : str
         Organism for NCBI lookup.
 
@@ -835,6 +843,7 @@ def run_pipeline(
         run_off_target=run_off_target,
         run_variant=run_variant,
         generate_html=generate_html,
+        generate_csv=generate_csv,
     )
     pipeline = ASOPipeline(config)
     return pipeline.run()

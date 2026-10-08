@@ -251,6 +251,29 @@ class TestPipelineConfig:
         assert cfg.transcriptome_path == "/data/transcriptome.fna"
         assert cfg.vcf_path == "/data/variants.vcf"
 
+    def test_from_args_csv_flag(self):
+        """--csv maps to PipelineConfig.generate_csv."""
+        import argparse
+
+        args = argparse.Namespace(
+            target="BRCA1",
+            chemistry="gapmer",
+            config=None,
+            local_fasta=None,
+            output_dir="out",
+            top_n=None,
+            min_score=0.0,
+            no_offtarget=False,
+            no_variant=False,
+            no_html=False,
+            csv=True,
+        )
+        cfg = PipelineConfig.from_args(args)
+        assert cfg.generate_csv is True
+        # Default (attribute absent) stays False.
+        del args.csv
+        assert PipelineConfig.from_args(args).generate_csv is False
+
     def test_design_parser_accepts_transcriptome_and_vcf(self):
         """The design subparser accepts --transcriptome and --vcf."""
         parser = build_parser()
@@ -780,6 +803,72 @@ class TestCliHandlersInProcess:
         assert os.path.exists(os.path.join(report_dir, "inproc.json"))
         assert os.path.exists(os.path.join(report_dir, "inproc.html"))
         assert "Report generation complete" in capsys.readouterr().out
+
+    def test_design_csv_export(self, tmp_path, capsys):
+        """`design --csv` writes a candidate CSV next to the reports."""
+        fasta_path = _write_test_fasta(str(tmp_path / "t.fasta"), seq_id="NM_CSV_1")
+        output_dir = str(tmp_path / "out")
+        rc = main(
+            [
+                "design",
+                "--target",
+                "NM_CSV_1",
+                "--local-fasta",
+                fasta_path,
+                "--output-dir",
+                output_dir,
+                "--top-n",
+                "3",
+                "--no-offtarget",
+                "--no-variant",
+                "--csv",
+                "--quiet",
+            ]
+        )
+        assert rc == 0
+        csv_path = os.path.join(output_dir, "NM_CSV_1_report.csv")
+        assert os.path.exists(csv_path)
+        with open(csv_path) as f:
+            lines = f.read().strip().splitlines()
+        assert lines[0].startswith("rank,sequence,start,end,chemistry")
+        assert len(lines) == 4  # header + 3 ranked candidates
+
+    def test_report_csv_export(self, tmp_path, capsys):
+        """`report --csv` writes a candidate CSV."""
+        fasta_path = _write_test_fasta(str(tmp_path / "t.fasta"), seq_id="NM_CSV_2")
+        design_dir = str(tmp_path / "design")
+        main(
+            [
+                "design",
+                "--target",
+                "NM_CSV_2",
+                "--local-fasta",
+                fasta_path,
+                "--output-dir",
+                design_dir,
+                "--no-offtarget",
+                "--no-variant",
+                "--quiet",
+            ]
+        )
+        design_json = os.path.join(design_dir, "NM_CSV_2_report.json")
+        report_dir = str(tmp_path / "reports")
+        rc = main(
+            [
+                "report",
+                "--results",
+                design_json,
+                "--output-dir",
+                report_dir,
+                "--basename",
+                "csvrep",
+                "--no-html",
+                "--csv",
+                "--quiet",
+            ]
+        )
+        assert rc == 0
+        assert os.path.exists(os.path.join(report_dir, "csvrep.csv"))
 
     def test_report_missing_file(self, capsys):
         rc = main(["report", "--results", "/nonexistent/results.json", "--quiet"])
