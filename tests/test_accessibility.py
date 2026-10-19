@@ -4,6 +4,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from aso_designer.accessibility import (
     AccessibilityProfile,
@@ -387,3 +388,132 @@ class TestStructureCaching:
         predictor_w80.predict_accessibility("ATGCATGC")
         predictor_w150.predict_accessibility("ATGCATGC")
         assert mock_rnaplfold.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# RNAup accessibility method (mocked ViennaRNA)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_rnaup_result():
+    from aso_designer.viennarna import RNAupResult
+
+    return RNAupResult(
+        sequence="AUGCAUGCAUGCAUGC",
+        positions=list(range(1, 17)),
+        unpaired_probs=[0.9, 0.1] * 8,
+        region_probs=[0.5, 0.4] * 8,
+        opening_dg=[0.11, 0.92] * 8,
+        region_length=4,
+    )
+
+
+class TestAccessibilityProfileFromRnaup:
+    def test_from_rnaup_result(self, mock_rnaup_result):
+        profile = AccessibilityProfile.from_rnaup_result(mock_rnaup_result)
+        assert profile.method == "rnaup"
+        assert profile.window_size == 0
+        assert profile.region_length == 4
+        assert profile.unpaired_probs == mock_rnaup_result.unpaired_probs
+        assert profile.region_probs == mock_rnaup_result.region_probs
+        assert profile.opening_dg == mock_rnaup_result.opening_dg
+
+    def test_get_opening_dg(self, mock_rnaup_result):
+        profile = AccessibilityProfile.from_rnaup_result(mock_rnaup_result)
+        assert profile.get_opening_dg(1) == 0.11
+        assert profile.get_opening_dg(2) == 0.92
+        assert profile.get_opening_dg(17) is None
+        assert profile.get_opening_dg(0) is None
+
+    def test_get_opening_dg_none_for_rnaplfold(self, mock_profile):
+        assert mock_profile.get_opening_dg(1) is None
+
+
+class TestPredictorRnaupMethod:
+    @patch("aso_designer.accessibility.run_rnaup")
+    def test_predict_accessibility_rnaup(self, mock_rnaup, mock_rnaup_result, tmp_path):
+        mock_rnaup.return_value = mock_rnaup_result
+        predictor = TargetStructurePredictor(cache_dir=tmp_path, method="rnaup", unpaired_region=4)
+        profile = predictor.predict_accessibility("ATGCATGCATGCATGC")
+        assert profile.method == "rnaup"
+        assert profile.region_length == 4
+        assert profile.opening_dg == mock_rnaup_result.opening_dg
+        mock_rnaup.assert_called_once()
+        # unpaired_region is passed through to RNAup
+        assert mock_rnaup.call_args.kwargs["unpaired_region"] == 4
+
+    @patch("aso_designer.accessibility.run_rnaplfold")
+    def test_invalid_method_rejected(self, mock_rnaplfold):
+        with pytest.raises(ValueError, match="Unknown accessibility method"):
+            TargetStructurePredictor(method="mfold")
+
+    @patch("aso_designer.accessibility.run_rnaup")
+    def test_rnaup_result_cached(self, mock_rnaup, mock_rnaup_result, tmp_path):
+        mock_rnaup.return_value = mock_rnaup_result
+        predictor = TargetStructurePredictor(cache_dir=tmp_path, method="rnaup", unpaired_region=4)
+        predictor.predict_accessibility("ATGCATGCATGCATGC")
+        predictor.predict_accessibility("ATGCATGCATGCATGC")
+        assert mock_rnaup.call_count == 1
+
+    @patch("aso_designer.accessibility.run_rnaplfold")
+    @patch("aso_designer.accessibility.run_rnaup")
+    def test_methods_use_distinct_cache_keys(
+        self, mock_rnaup, mock_rnaplfold, mock_rnaplfold_result, mock_rnaup_result, tmp_path
+    ):
+        mock_rnaplfold.return_value = mock_rnaplfold_result
+        mock_rnaup.return_value = mock_rnaup_result
+        p1 = TargetStructurePredictor(cache_dir=tmp_path, method="rnaplfold")
+        p2 = TargetStructurePredictor(cache_dir=tmp_path, method="rnaup")
+        p1.predict_accessibility("ATGCATGC")
+        p2.predict_accessibility("ATGCATGC")
+        assert mock_rnaplfold.call_count == 1
+        assert mock_rnaup.call_count == 1
+        # same-method different-region predictions also miss the cache
+        p3 = TargetStructurePredictor(cache_dir=tmp_path, method="rnaup", unpaired_region=6)
+        p3.predict_accessibility("ATGCATGC")
+        assert mock_rnaup.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Accessibility config plumbing
+# ---------------------------------------------------------------------------
+
+
+class TestAccessibilityMethodConfig:
+    def test_schema_defaults(self):
+        from aso_designer.config_schema import ASOConfig
+
+        cfg = ASOConfig()
+        assert cfg.accessibility.method == "rnaplfold"
+        assert cfg.accessibility.unpaired_region == 4
+        assert cfg.accessibility.window_size == 150
+
+    def test_method_accepted(self):
+        from aso_designer.config_schema import ASOConfig
+
+        assert ASOConfig(accessibility={"method": "rnaup"}).accessibility.method == "rnaup"
+
+    def test_method_rejected(self):
+        from aso_designer.config_schema import ASOConfig
+
+        with pytest.raises(ValidationError):
+            ASOConfig(accessibility={"method": "mfold"})
+
+    def test_unpaired_region_bounds(self):
+        from aso_designer.config_schema import ASOConfig
+
+        assert ASOConfig(accessibility={"unpaired_region": 1}).accessibility.unpaired_region == 1
+        assert ASOConfig(accessibility={"unpaired_region": 15}).accessibility.unpaired_region == 15
+        with pytest.raises(ValidationError):
+            ASOConfig(accessibility={"unpaired_region": 0})
+        with pytest.raises(ValidationError):
+            ASOConfig(accessibility={"unpaired_region": 16})
+
+    def test_yaml_default_loads(self):
+        """The shipped YAML parses and carries the new keys."""
+        from aso_designer.config_loader import load_config
+
+        cfg = load_config()
+        assert cfg.accessibility.method == "rnaplfold"
+        assert cfg.accessibility.unpaired_region == 4

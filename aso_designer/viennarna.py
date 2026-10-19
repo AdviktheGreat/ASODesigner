@@ -409,6 +409,172 @@ def _parse_rnaplfold_lunp(filepath: Path) -> RNAplfoldResult:
 
 
 # ---------------------------------------------------------------------------
+# RNAup wrapper (accessibility by RNA opening energy)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RNAupResult:
+    """Result of an RNAup computation.
+
+    Attributes
+    ----------
+    sequence : str
+        RNA sequence analyzed.
+    positions : list[int]
+        1-based positions in the sequence.
+    unpaired_probs : list[float]
+        Probability p(0) that each individual nucleotide is unpaired.
+    region_probs : list[float]
+        Probability that the region of ``region_length`` nucleotides
+        starting at each position is unbound.
+    opening_dg : list[float]
+        Per-position opening energy ΔG_open in kcal/mol (the energy to
+        open the region; larger = less accessible).
+    region_length : int
+        Length of the unpaired region the probabilities refer to.
+    """
+
+    sequence: str
+    positions: list[int]
+    unpaired_probs: list[float]
+    region_probs: list[float]
+    opening_dg: list[float]
+    region_length: int
+
+
+def _parse_rnaup_stdout(stdout: str, sequence: str) -> RNAupResult:
+    """Parse RNAup stdout into an :class:`RNAupResult`.
+
+    RNAup prints a header (``RNAup output in file: ...``), the input
+    FASTA, then a region block::
+
+        >t_1
+        AUGCUAGC...
+        [region 4]
+           1    0.98    0.90    -0.1053
+           2    ...
+
+    Each data row holds the 1-based position ``i``, the per-nucleotide
+    unpaired probability ``p(0)``, the probability that the region of
+    length L starting at ``i`` is unbound, and the opening energy
+    ``dG(i)`` in kcal/mol.
+    """
+    region_length: int | None = None
+    positions: list[int] = []
+    unpaired_probs: list[float] = []
+    region_probs: list[float] = []
+    opening_dg: list[float] = []
+
+    in_block = False
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = re.search(r"\[region\s+(\d+)\]", stripped)
+        if match:
+            region_length = int(match.group(1))
+            in_block = True
+            continue
+        if not in_block:
+            continue
+        parts = stripped.split()
+        try:
+            pos = int(parts[0])
+        except ValueError:
+            continue  # header/comment lines inside the block
+        floats: list[float] = []
+        for token in parts[1:]:
+            try:
+                floats.append(float(token))
+            except ValueError:
+                break
+        if len(floats) < 3:
+            raise ViennaRNAError(f"Could not parse RNAup output row: {stripped[:100]}")
+        positions.append(pos)
+        unpaired_probs.append(floats[0])
+        region_probs.append(floats[1])
+        opening_dg.append(floats[2])
+
+    if region_length is None or not positions:
+        raise ViennaRNAError(f"Could not parse RNAup output: {stdout[:200]}")
+
+    logger.debug("Parsed %d RNAup region-%d rows", len(positions), region_length)
+    return RNAupResult(
+        sequence=sequence,
+        positions=positions,
+        unpaired_probs=unpaired_probs,
+        region_probs=region_probs,
+        opening_dg=opening_dg,
+        region_length=region_length,
+    )
+
+
+def run_rnaup(
+    sequence: str,
+    unpaired_region: int = 4,
+) -> RNAupResult:
+    """Run RNAup to compute per-site RNA opening energies.
+
+    RNAup computes, for each nucleotide, the probability that the
+    nucleotide and the following ``unpaired_region``-long stretch remain
+    unbound, and converts that into an opening energy
+    ΔG_open = −kT·ln(p_unbound). This complements the RNAplfold
+    unpaired-probability screen with an explicit per-site opening
+    energy.
+
+    Parameters
+    ----------
+    sequence : str
+        DNA or RNA sequence (case-insensitive, T → U conversion applied).
+    unpaired_region : int
+        Maximum length of the unpaired region to consider (default 4,
+        RNAup's own default).
+
+    Returns
+    -------
+    RNAupResult
+        Per-position unpaired probabilities, region probabilities, and
+        opening energies.
+
+    Raises
+    ------
+    ViennaRNAError
+        If RNAup fails or its output cannot be parsed.
+    """
+    import tempfile
+
+    rna_seq = dna_to_rna(sequence)
+    tool_path = _get_tool_path("RNAup")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        args = [
+            tool_path,
+            "--id",
+            "asodesigner",
+            "-u",
+            str(unpaired_region),
+        ]
+
+        input_data = f">asodesigner\n{rna_seq}\n"
+
+        try:
+            proc = subprocess.run(
+                args,
+                input=input_data,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=300,
+                cwd=tmpdir,
+            )
+        except subprocess.SubprocessError as e:
+            raise ViennaRNAError(f"RNAup execution failed: {e}") from e
+
+        return _parse_rnaup_stdout(proc.stdout, rna_seq)
+
+
+# ---------------------------------------------------------------------------
 # RNAcofold wrapper (two-sequence hybridization with intramolecular structure)
 # ---------------------------------------------------------------------------
 

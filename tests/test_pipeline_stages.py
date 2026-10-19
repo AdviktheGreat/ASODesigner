@@ -12,7 +12,7 @@ import pytest
 
 from aso_designer.pipeline import ASOPipeline, PipelineConfig
 from aso_designer.transcript_fetcher import TranscriptRecord
-from aso_designer.viennarna import RNAplfoldResult, ViennaRNAError
+from aso_designer.viennarna import RNAplfoldResult, RNAupResult, ViennaRNAError
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -63,6 +63,24 @@ def mock_rnaplfold_result() -> RNAplfoldResult:
     return RNAplfoldResult(
         positions=list(range(1, n + 1)),
         unpaired_probs=probs,
+    )
+
+
+@pytest.fixture
+def mock_rnaup_result() -> RNAupResult:
+    """RNAup profile for the full transcript: unpaired (0.9) in the first
+    half, paired (0.1) in the second; opening energies 0.1 / 2.0."""
+    n = len(TRANSCRIPT_SEQ)
+    half = n // 2
+    p0 = [0.9] * half + [0.1] * (n - half)
+    dg = [0.1] * half + [2.0] * (n - half)
+    return RNAupResult(
+        sequence=TRANSCRIPT_SEQ.replace("T", "U"),
+        positions=list(range(1, n + 1)),
+        unpaired_probs=p0,
+        region_probs=p0,
+        opening_dg=dg,
+        region_length=4,
     )
 
 
@@ -208,6 +226,45 @@ class TestAccessibilityStage:
         pipeline._transcript = None
         with pytest.raises(RuntimeError, match="No transcript"):
             pipeline._stage_accessibility()
+
+    @patch("aso_designer.viennarna.verify_viennarna")
+    @patch("aso_designer.accessibility.run_rnaup")
+    def test_rnaup_method_writes_opening_dg(self, mock_rnaup, mock_verify, mock_rnaup_result):
+        """With accessibility.method=rnaup, candidates get the mean opening
+        energy of their binding window in addition to the score."""
+
+        mock_verify.return_value = MagicMock()
+        mock_rnaup.return_value = mock_rnaup_result
+
+        pipeline = make_pipeline()
+        pipeline.aso_config.accessibility.method = "rnaup"
+        pipeline.aso_config.accessibility.unpaired_region = 4
+        run_through_filter(pipeline)
+        pipeline._stage_accessibility()
+
+        passed = passing_candidates(pipeline)
+        assert len(passed) > 0
+        for c in passed:
+            assert "accessibility_score" in c.features
+            assert "accessibility_opening_dg" in c.features
+            expected = sum(mock_rnaup_result.opening_dg[c.start : c.end]) / (c.end - c.start)
+            assert c.features["accessibility_opening_dg"] == pytest.approx(expected)
+
+    @patch("aso_designer.viennarna.verify_viennarna")
+    @patch("aso_designer.accessibility.run_rnaplfold")
+    def test_rnaplfold_method_writes_no_opening_dg(
+        self, mock_plfold, mock_verify, mock_rnaplfold_result
+    ):
+        """The RNAplfold method must not write the RNAup-specific feature."""
+        mock_verify.return_value = MagicMock()
+        mock_plfold.return_value = mock_rnaplfold_result
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_accessibility()
+
+        for c in passing_candidates(pipeline):
+            assert "accessibility_opening_dg" not in c.features
 
 
 # ---------------------------------------------------------------------------

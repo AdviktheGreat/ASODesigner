@@ -4,7 +4,7 @@ Inspired by GuideX's Cas13Config but redesigned for ASO-specific parameters
 with nested models, cross-field validation, and detailed field descriptions.
 """
 
-from pydantic import BaseModel, Field, confloat, conint, model_validator
+from pydantic import BaseModel, Field, confloat, conint, field_validator, model_validator
 
 
 class FetchConfig(BaseModel):
@@ -98,6 +98,17 @@ class MixmerConfig(BaseModel):
 class AccessibilityConfig(BaseModel):
     """RNA accessibility analysis parameters."""
 
+    method: str = Field(
+        default="rnaplfold",
+        description=(
+            "Accessibility tool: 'rnaplfold' (sliding-window unpaired "
+            "probability) or 'rnaup' (per-site opening energy)."
+        ),
+    )
+    unpaired_region: conint(ge=1, le=15) = Field(
+        default=4,
+        description="Unpaired-region length for the RNAup method (-u).",
+    )
     window_size: conint(ge=50, le=500) = Field(
         default=150, description="RNAplfold sliding window size (nt)."
     )
@@ -107,6 +118,15 @@ class AccessibilityConfig(BaseModel):
     accessible_threshold: confloat(ge=0.0, le=1.0) = Field(
         default=0.5, description="Accessibility score threshold for 'accessible'."
     )
+
+    @field_validator("method")
+    @classmethod
+    def validate_method(cls, v: str) -> str:
+        """Restrict the accessibility method to supported tools."""
+        allowed = {"rnaplfold", "rnaup"}
+        if v not in allowed:
+            raise ValueError(f"accessibility.method must be one of {sorted(allowed)}, got {v!r}")
+        return v
 
 
 class ThermodynamicsConfig(BaseModel):

@@ -16,11 +16,13 @@ from aso_designer.viennarna import (
     _parse_rnaduplex_output,
     _parse_rnafold_output,
     _parse_rnaplfold_lunp,
+    _parse_rnaup_stdout,
     _parse_version,
     run_rnacofold,
     run_rnaduplex,
     run_rnafold,
     run_rnaplfold,
+    run_rnaup,
     verify_viennarna,
 )
 
@@ -342,3 +344,71 @@ class TestRunRnaduplex:
         mock_run.side_effect = subprocess.SubprocessError("boom")
         with pytest.raises(ViennaRNAError, match="execution failed"):
             run_rnaduplex("ATGC", "ATGC")
+
+
+# ---------------------------------------------------------------------------
+# RNAup parser and wrapper (mocked subprocess)
+# ---------------------------------------------------------------------------
+
+RNAUP_STDOUT = """RNAup output in file: asodesigner_unup.out
+>t_1
+AUGCUAGC
+[region 4]
+   1    0.98    0.90    -0.1053
+   2    0.96    0.85    0.1625
+   3    0.40    0.10    2.3026
+"""
+
+
+class TestParseRnaupStdout:
+    def test_standard_layout(self):
+        r = _parse_rnaup_stdout(RNAUP_STDOUT, "AUGCUAGC")
+        assert r.sequence == "AUGCUAGC"
+        assert r.positions == [1, 2, 3]
+        assert r.unpaired_probs == [0.98, 0.96, 0.40]
+        assert r.region_probs == [0.90, 0.85, 0.10]
+        assert r.opening_dg == [-0.1053, 0.1625, 2.3026]
+        assert r.region_length == 4
+
+    def test_missing_region_block(self):
+        with pytest.raises(ViennaRNAError, match="Could not parse RNAup"):
+            _parse_rnaup_stdout(">t_1\nAUGCUAGC\n", "AUGCUAGC")
+
+    def test_bad_row(self):
+        bad = RNAUP_STDOUT.replace("2    0.96    0.85    0.1625", "2    0.96")
+        with pytest.raises(ViennaRNAError, match="output row"):
+            _parse_rnaup_stdout(bad, "AUGCUAGC")
+
+
+class TestRunRnaup:
+    @patch("aso_designer.viennarna._get_tool_path")
+    @patch("aso_designer.viennarna.subprocess.run")
+    def test_run_success_parses_stdout(self, mock_run, mock_path):
+        mock_path.return_value = "/usr/local/bin/RNAup"
+        mock_run.return_value = MagicMock(stdout=RNAUP_STDOUT, stderr="")
+        r = run_rnaup("ATGCTAGC", unpaired_region=4)
+        assert r.region_length == 4
+        assert r.positions == [1, 2, 3]
+        assert r.opening_dg == [-0.1053, 0.1625, 2.3026]
+        # T converted to U in the sequence handed to RNAup
+        stdin = mock_run.call_args.kwargs["input"]
+        assert "AUGCUAGC" in stdin
+
+    @patch("aso_designer.viennarna._get_tool_path")
+    @patch("aso_designer.viennarna.subprocess.run")
+    def test_run_passes_unpaired_region(self, mock_run, mock_path):
+        mock_path.return_value = "/usr/local/bin/RNAup"
+        mock_run.return_value = MagicMock(stdout=RNAUP_STDOUT, stderr="")
+        run_rnaup("ATGC", unpaired_region=6)
+        args = mock_run.call_args.args[0]
+        assert "-u" in args
+        assert args[args.index("-u") + 1] == "6"
+        assert "--id" in args
+
+    @patch("aso_designer.viennarna._get_tool_path")
+    @patch("aso_designer.viennarna.subprocess.run")
+    def test_run_failure(self, mock_run, mock_path):
+        mock_path.return_value = "/usr/local/bin/RNAup"
+        mock_run.side_effect = subprocess.SubprocessError("boom")
+        with pytest.raises(ViennaRNAError, match="execution failed"):
+            run_rnaup("ATGC")

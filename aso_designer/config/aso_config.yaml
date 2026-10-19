@@ -71,6 +71,14 @@ mixmer:
 # RNA accessibility (ViennaRNA)
 # ---------------------------------------------------------------------------
 accessibility:
+  # Accessibility tool: 'rnaplfold' computes sliding-window unpaired
+  # probabilities; 'rnaup' computes per-site opening energies (dG_open)
+  # that complement the unpaired-probability screen.
+  method: rnaplfold
+
+  # Unpaired-region length for the RNAup method (-u).
+  unpaired_region: 4
+
   # RNAplfold sliding window size (nt) for local accessibility.
   # Larger windows capture longer-range interactions but are slower.
   window_size: 150

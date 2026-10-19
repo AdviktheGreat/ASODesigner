@@ -18,7 +18,14 @@ from pathlib import Path
 
 from aso_designer.utils.logger import get_logger
 from aso_designer.utils.sequence import dna_to_rna
-from aso_designer.viennarna import RNAfoldResult, RNAplfoldResult, run_rnafold, run_rnaplfold
+from aso_designer.viennarna import (
+    RNAfoldResult,
+    RNAplfoldResult,
+    RNAupResult,
+    run_rnafold,
+    run_rnaplfold,
+    run_rnaup,
+)
 
 logger = get_logger(__name__)
 
@@ -53,7 +60,7 @@ class TargetStructure:
 
 @dataclass
 class AccessibilityProfile:
-    """Per-position accessibility profile from RNAplfold.
+    """Per-position accessibility profile from RNAplfold or RNAup.
 
     Attributes
     ----------
@@ -62,15 +69,32 @@ class AccessibilityProfile:
     positions : list[int]
         1-based positions in the sequence.
     unpaired_probs : list[float]
-        Probability of being unpaired at each position (0.0–1.0).
+        Probability of being unpaired at each position (0.0–1.0). For
+        RNAup this is the p(0) per-nucleotide unpaired probability.
     window_size : int
-        RNAplfold sliding window size used.
+        RNAplfold sliding window size used (0 for RNAup, which folds
+        the full sequence rather than a sliding window).
+    method : str
+        Tool the profile came from: "rnaplfold" (default) or "rnaup".
+    region_probs : list[float] or None
+        RNAup only: probability that the region of ``region_length``
+        nucleotides starting at each position is unbound.
+    opening_dg : list[float] or None
+        RNAup only: per-position opening energy ΔG_open in kcal/mol
+        for the region starting at each position.
+    region_length : int
+        Length of the unpaired region the profile refers to (1 for
+        RNAplfold; the RNAup ``-u`` value otherwise).
     """
 
     sequence: str
     positions: list[int]
     unpaired_probs: list[float]
     window_size: int
+    method: str = "rnaplfold"
+    region_probs: list[float] | None = None
+    opening_dg: list[float] | None = None
+    region_length: int = 1
 
     @classmethod
     def from_rnaplfold_result(
@@ -83,6 +107,40 @@ class AccessibilityProfile:
             unpaired_probs=result.unpaired_probs,
             window_size=window_size,
         )
+
+    @classmethod
+    def from_rnaup_result(cls, result: RNAupResult, window_size: int = 0) -> AccessibilityProfile:
+        """Build an AccessibilityProfile from an RNAupResult."""
+        return cls(
+            sequence=result.sequence,
+            positions=result.positions,
+            unpaired_probs=result.unpaired_probs,
+            window_size=window_size,
+            method="rnaup",
+            region_probs=result.region_probs,
+            opening_dg=result.opening_dg,
+            region_length=result.region_length,
+        )
+
+    def get_opening_dg(self, position: int) -> float | None:
+        """Get the RNAup opening energy for the region at a 1-based position.
+
+        Parameters
+        ----------
+        position : int
+            1-based position in the sequence (the region's start).
+
+        Returns
+        -------
+        float or None
+            Opening energy ΔG_open in kcal/mol, or None when the profile
+            was not computed with RNAup or the position is out of range.
+        """
+        if self.opening_dg is None:
+            return None
+        if position < 1 or position > len(self.opening_dg):
+            return None
+        return self.opening_dg[position - 1]
 
     def get_unpaired_prob(self, position: int) -> float:
         """Get the unpaired probability at a 1-based position.
@@ -105,7 +163,7 @@ class AccessibilityProfile:
 class TargetStructurePredictor:
     """Predicts target RNA structure and accessibility.
 
-    Wraps RNAfold and RNAplfold with caching to avoid
+    Wraps RNAfold and RNAplfold/RNAup with caching to avoid
     re-computation on repeated runs.
 
     Parameters
@@ -117,6 +175,11 @@ class TargetStructurePredictor:
         RNAplfold sliding window size (default 150).
     max_pairing_distance : int
         Maximum base pair distance for RNAplfold (default 100).
+    method : str
+        Accessibility tool: "rnaplfold" (default) or "rnaup".
+    unpaired_region : int
+        Length of the unpaired region for RNAup's ``-u`` option
+        (default 4); ignored for RNAplfold.
     """
 
     def __init__(
@@ -124,10 +187,16 @@ class TargetStructurePredictor:
         cache_dir: Path | str | None = None,
         window_size: int = 150,
         max_pairing_distance: int = 100,
+        method: str = "rnaplfold",
+        unpaired_region: int = 4,
     ):
+        if method not in ("rnaplfold", "rnaup"):
+            raise ValueError(f"Unknown accessibility method: {method}. Use 'rnaplfold' or 'rnaup'.")
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.window_size = window_size
         self.max_pairing_distance = max_pairing_distance
+        self.method = method
+        self.unpaired_region = unpaired_region
 
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -165,7 +234,8 @@ class TargetStructurePredictor:
     def predict_accessibility(self, sequence: str) -> AccessibilityProfile:
         """Predict the local accessibility profile of a sequence.
 
-        Uses RNAplfold and caches the result.
+        Uses RNAplfold or RNAup (per ``self.method``) and caches the
+        result.
 
         Parameters
         ----------
@@ -175,25 +245,43 @@ class TargetStructurePredictor:
         Returns
         -------
         AccessibilityProfile
-            Per-position unpaired probabilities.
+            Per-position unpaired probabilities; for RNAup also the
+            per-region unbound probabilities and opening energies.
         """
         rna_seq = dna_to_rna(sequence)
 
         cache_key = self._cache_key(
-            rna_seq, f"accessibility_W{self.window_size}_L{self.max_pairing_distance}"
+            rna_seq,
+            f"accessibility_{self.method}"
+            f"{'_W' + str(self.window_size) if self.method == 'rnaplfold' else ''}"
+            f"_L{self.max_pairing_distance}"
+            f"{'_u' + str(self.unpaired_region) if self.method == 'rnaup' else ''}",
         )
         cached = self._load_cache(cache_key)
         if cached is not None:
-            logger.debug("Using cached accessibility for sequence of length %d", len(rna_seq))
+            logger.debug(
+                "Using cached accessibility (%s) for sequence of length %d",
+                self.method,
+                len(rna_seq),
+            )
             return cached
 
-        logger.info("Running RNAplfold on sequence of length %d", len(rna_seq))
-        result = run_rnaplfold(
-            rna_seq,
-            window_size=self.window_size,
-            max_span=self.max_pairing_distance,
-        )
-        profile = AccessibilityProfile.from_rnaplfold_result(result, rna_seq, self.window_size)
+        if self.method == "rnaup":
+            logger.info(
+                "Running RNAup on sequence of length %d (region=%d)",
+                len(rna_seq),
+                self.unpaired_region,
+            )
+            result = run_rnaup(rna_seq, unpaired_region=self.unpaired_region)
+            profile = AccessibilityProfile.from_rnaup_result(result)
+        else:
+            logger.info("Running RNAplfold on sequence of length %d", len(rna_seq))
+            result = run_rnaplfold(
+                rna_seq,
+                window_size=self.window_size,
+                max_span=self.max_pairing_distance,
+            )
+            profile = AccessibilityProfile.from_rnaplfold_result(result, rna_seq, self.window_size)
 
         self._save_cache(cache_key, profile)
         return profile

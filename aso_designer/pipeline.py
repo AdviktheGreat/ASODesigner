@@ -399,10 +399,13 @@ class ASOPipeline:
         """Compute RNA accessibility features for passing candidates.
 
         Predicts the accessibility profile of the full target transcript
-        with RNAplfold (via TargetStructurePredictor, with disk caching),
-        then scores each passing candidate's binding site window with
+        with RNAplfold or RNAup (per ``accessibility.method``, via
+        TargetStructurePredictor, with disk caching), then scores each
+        passing candidate's binding site window with
         ``score_window_accessibility``. The per-candidate score is stored
-        in ``candidate.features["accessibility_score"]``.
+        in ``candidate.features["accessibility_score"]``; with the RNAup
+        method the mean opening energy over the binding window is also
+        stored in ``candidate.features["accessibility_opening_dg"]``.
 
         Requires ViennaRNA; raises ViennaRNAError if unavailable. The
         pipeline treats this stage as non-fatal and continues with
@@ -421,14 +424,17 @@ class ASOPipeline:
         verify_viennarna()
 
         logger.info(
-            "Predicting accessibility profile (%d nt, window=%d, max_span=%d)",
+            "Predicting accessibility profile (%d nt, method=%s, window=%d, max_span=%d)",
             len(self._transcript.sequence),
+            acc_cfg.method,
             acc_cfg.window_size,
             acc_cfg.max_pairing_distance,
         )
         predictor = TargetStructurePredictor(
             window_size=acc_cfg.window_size,
             max_pairing_distance=acc_cfg.max_pairing_distance,
+            method=acc_cfg.method,
+            unpaired_region=acc_cfg.unpaired_region,
         )
         profile = predictor.predict_accessibility(self._transcript.sequence)
 
@@ -440,6 +446,12 @@ class ASOPipeline:
             # candidates use 0-based [start, end).
             score = score_window_accessibility(profile, candidate.start + 1, candidate.end)
             candidate.features["accessibility_score"] = score
+            if profile.method == "rnaup" and profile.opening_dg is not None:
+                # The binding window [start, end) is 1-based [start+1, end];
+                # opening_dg is 0-indexed, so that is the slice [start:end].
+                window_dg = profile.opening_dg[candidate.start : candidate.end]
+                if window_dg:
+                    candidate.features["accessibility_opening_dg"] = sum(window_dg) / len(window_dg)
             computed += 1
 
         logger.info("Computed accessibility for %d candidates", computed)
