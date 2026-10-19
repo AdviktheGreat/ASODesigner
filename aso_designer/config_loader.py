@@ -65,6 +65,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 def load_config(
     user_config_path: str | Path | None = None,
     chemistry: str | None = None,
+    profile: str | None = None,
 ) -> ASOConfig:
     """Load and validate ASODesigner configuration.
 
@@ -80,6 +81,9 @@ def load_config(
     chemistry : str, optional
         Chemistry name to apply preset adjustments (e.g. "gapmer").
         Overrides the chemistry in the config if provided.
+    profile : str, optional
+        Named scoring weight profile (balanced, efficacy, specificity,
+        safety). Overrides the config's profile selection when provided.
 
     Returns
     -------
@@ -114,6 +118,20 @@ def load_config(
         user_chemistry = user_data.get("candidate", {}).get("chemistry")
         if user_chemistry and user_chemistry != effective_chemistry:
             config_data = _apply_chemistry_preset(config_data, user_chemistry)
+
+    # Resolve the scoring weight profile. An explicit profile argument
+    # (e.g. from the CLI) wins; otherwise the config's own profile is
+    # used, except when the user supplied explicit weights (those win).
+    scoring_data = config_data.setdefault("scoring", {})
+    effective_profile = profile or scoring_data.get("profile", "balanced")
+    user_set_weights = "weights" in scoring_data and profile is None
+    if effective_profile and effective_profile != "balanced" and not user_set_weights:
+        from aso_designer.config_schema import WEIGHT_PROFILES
+
+        weights = WEIGHT_PROFILES[effective_profile]
+        scoring_data["weights"] = dict(weights)
+        scoring_data["profile"] = effective_profile
+        logger.info("Applied scoring weight profile '%s'", effective_profile)
 
     # Validate
     try:

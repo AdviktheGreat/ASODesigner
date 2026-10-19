@@ -249,3 +249,44 @@ def test_asoconfig_accepts_lna_chemistry():
     cfg = ASOConfig(candidate={"chemistry": "lna"})
     assert cfg.candidate.chemistry == "lna"
     assert cfg.lna.pattern == []
+
+
+# ---------------------------------------------------------------------------
+# Weight profiles
+# ---------------------------------------------------------------------------
+
+
+def test_weight_profile_applied():
+    from aso_designer.config_loader import load_config
+
+    cfg = load_config(profile="specificity")
+    assert cfg.scoring.weights.off_target == 0.45
+    assert cfg.scoring.profile == "specificity"
+
+
+def test_weight_profile_from_yaml():
+    from aso_designer.config_loader import load_config
+
+    cfg = load_config()
+    assert cfg.scoring.profile == "balanced"
+    assert cfg.scoring.weights.accessibility == 0.25
+
+
+def test_profile_invalid_rejected():
+    from pydantic import ValidationError
+
+    from aso_designer.config_schema import ASOConfig
+
+    with pytest.raises(ValidationError, match="scoring.profile"):
+        ASOConfig(scoring={"profile": "aggressive"})
+
+
+def test_explicit_weights_beat_config_profile():
+    """Explicit user weights win over the YAML/config profile."""
+    from aso_designer.config_schema import WEIGHT_PROFILES, ASOConfig
+
+    weights = dict(WEIGHT_PROFILES["safety"])
+    weights["accessibility"] = 0.20
+    weights["variant"] = 0.30  # keep the sum at 1.0
+    cfg2 = ASOConfig(scoring={"profile": "safety", "weights": weights})
+    assert cfg2.scoring.weights.accessibility == 0.20

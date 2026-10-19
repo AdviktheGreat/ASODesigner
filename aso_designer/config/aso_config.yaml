@@ -197,6 +197,10 @@ variant:
 # final composite score. Adjust based on your prioritization needs.
 # All sub-scores are normalized to 0.0–1.0 before weighting.
 scoring:
+  # Named weight profile: balanced, efficacy, specificity, or safety.
+  # Applied unless explicit weights are set below.
+  profile: balanced
+
   # Ranking mode: "weighted" (weighted sum) or "pareto" (non-dominated
   # sorting over efficacy/specificity/safety axes).
   rank_mode: weighted

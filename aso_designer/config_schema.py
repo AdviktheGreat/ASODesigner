@@ -329,14 +329,73 @@ class ScoringWeightsConfig(BaseModel):
         return self
 
 
+# Named weight profiles: quick presets over the seven component weights
+# so users don't hand-edit floats. "balanced" equals the schema defaults.
+WEIGHT_PROFILES: dict[str, dict[str, float]] = {
+    "balanced": {
+        "accessibility": 0.25,
+        "thermodynamics": 0.20,
+        "gc_content": 0.10,
+        "off_target": 0.20,
+        "variant": 0.10,
+        "self_structure": 0.10,
+        "positional": 0.05,
+    },
+    "efficacy": {
+        "accessibility": 0.35,
+        "thermodynamics": 0.30,
+        "gc_content": 0.05,
+        "off_target": 0.10,
+        "variant": 0.05,
+        "self_structure": 0.10,
+        "positional": 0.05,
+    },
+    "specificity": {
+        "accessibility": 0.15,
+        "thermodynamics": 0.10,
+        "gc_content": 0.10,
+        "off_target": 0.45,
+        "variant": 0.15,
+        "self_structure": 0.05,
+        "positional": 0.00,
+    },
+    "safety": {
+        "accessibility": 0.15,
+        "thermodynamics": 0.15,
+        "gc_content": 0.10,
+        "off_target": 0.15,
+        "variant": 0.35,
+        "self_structure": 0.10,
+        "positional": 0.00,
+    },
+}
+
+
 class ScoringConfig(BaseModel):
     """Scoring configuration."""
 
     weights: ScoringWeightsConfig = Field(default_factory=ScoringWeightsConfig)
+    profile: str = Field(
+        default="balanced",
+        description=(
+            "Named weight profile: balanced, efficacy, specificity, or "
+            "safety. Applied by the config loader unless the user set "
+            "explicit weights; 'balanced' keeps the schema defaults."
+        ),
+    )
     rank_mode: str = Field(
         default="weighted",
         description="Ranking mode: 'weighted' (weighted sum) or 'pareto' (non-dominated sort).",
     )
+
+    @field_validator("profile")
+    @classmethod
+    def validate_profile(cls, v: str) -> str:
+        """Restrict the weight-profile name."""
+        allowed = set(WEIGHT_PROFILES)
+        if v not in allowed:
+            raise ValueError(f"scoring.profile must be one of {sorted(allowed)}, got {v!r}")
+        return v
 
     @field_validator("rank_mode")
     @classmethod

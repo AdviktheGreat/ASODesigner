@@ -88,6 +88,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="ASO chemistry (default: gapmer).",
     )
     parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        choices=["balanced", "efficacy", "specificity", "safety"],
+        help="Named scoring weight profile (default: config value / balanced).",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose (DEBUG-level) logging.",
@@ -805,7 +812,9 @@ def _handle_info(args: argparse.Namespace) -> int:
     print()
 
     # Load config
-    config = load_config(args.config, chemistry=args.chemistry)
+    config = load_config(
+        args.config, chemistry=args.chemistry, profile=getattr(args, "profile", None)
+    )
 
     # Show candidate config
     print("  Candidate Configuration:")
