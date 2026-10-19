@@ -28,21 +28,30 @@ candidate scoring.
   or load from local FASTA files, with a cache layer for repeated runs.
 - **Candidate generation** — sliding-window generation of ASO candidates
   (15–25 nt) across the target transcript with support for gapmer, mixmer,
-  2'-OMe, MOE, and morpholino chemistries.
-- **Pre-filters** — GC content, homopolymer, end stability, and ambiguous
-  base filters to reject poor candidates before expensive computation.
+  2'-OMe, MOE, morpholino, and LNA chemistries, with per-linkage PS/PO
+  backbone patterns.
+- **Pre-filters** — GC content, homopolymer, end stability, ambiguous base,
+  and self-dimer/3'-self-complementarity filters to reject poor candidates
+  before expensive computation.
 - **RNA accessibility** — predict target RNA secondary structure and
   identify accessible binding sites using ViennaRNA (RNAfold, RNAplfold).
 - **Thermodynamic scoring** — compute melting temperature (Tm) via the
   SantaLucia 1998 nearest-neighbor model, duplex ΔG, self-structure ΔG,
   target structure ΔG, and net binding energy.
 - **Off-target analysis** — transcriptome-wide seed-and-extend search for
-  partial-complement matches with seed-region weighting and specificity
-  classification.
+  partial-complement matches with configurable seed span, k-mer size, and
+  an optional spaced-seed index; persistent index cache; optional
+  multiprocessing; seed-region weighting and specificity classification.
 - **Variant awareness** — flag candidates overlapping known SNPs or
   pathogenic variants from dbSNP/ClinVar APIs or user-provided VCF files.
+- **Isoform awareness** — binding-site conservation across fetched gene
+  isoforms feeds an optional scoring component, so multi-isoform data
+  affects ranking.
 - **Interpretable scoring** — transparent, multi-factor candidate ranking
-  with 7 score components, documented weights, and chemistry-aware bonuses.
+  with 8 score components, documented weights, chemistry-aware bonuses,
+  named weight profiles, deterministic tie-breaking, and an optional
+  Pareto ranking mode. A `calibrate` subcommand fits weights to measured
+  activity data via ridge regression.
 - **Motif screening** — flags immunostimulatory motifs (CpG content,
   canonical TLR9 hexamers) and G-quadruplex-prone runs per candidate.
 - **Reporting** — structured JSON and self-contained HTML reports with
@@ -212,9 +221,9 @@ reporting:
 
 ### Chemistry presets
 
-Each chemistry has preset adjustments for Tm, self-structure weight, and
-bonuses. Available chemistries: `gapmer`, `mixmer`, `2ome`, `moe`,
-`morpholino`.
+Each chemistry has preset adjustments for Tm, self-structure weight,
+end-stability GC bounds, RNase H eligibility, and bonuses. Available
+chemistries: `gapmer`, `mixmer`, `2ome`, `moe`, `morpholino`, `lna`.
 
 ```bash
 # View presets for a specific chemistry
@@ -230,7 +239,7 @@ asodesigner design --target BRCA1 --config my_config.yaml --output-dir results/
 
 ## Scoring
 
-Candidates are scored by a weighted composite of 7 components:
+Candidates are scored by a weighted composite of 8 components:
 
 | Component | Weight | Description |
 |---|---|---|
@@ -241,11 +250,16 @@ Candidates are scored by a weighted composite of 7 components:
 | Variant | 0.10 | SNP/pathogenic overlap penalty |
 | Self-structure | 0.10 | Self-folding penalty |
 | Positional | 0.05 | Region preference (CDS > 5UTR > 3UTR) |
+| Isoform conservation | 0.00* | Binding-window conservation across gene isoforms (opt-in) |
 
 Each component returns a score in [0, 1]. The composite score is the
 weighted sum, plus an optional chemistry bonus, clamped to [0, 1].
 Candidates are ranked by composite score and filtered by configurable
-thresholds.
+thresholds. Named weight profiles (`--profile balanced|efficacy|specificity|safety`)
+swap the whole weight vector; ranking supports weighted and Pareto modes
+(`scoring.rank_mode`); `scoring.ignore_neutral_components` re-scores
+candidates using only components backed by real data; every candidate
+carries per-component data-completeness flags in the JSON output.
 
 ## Testing
 
@@ -260,7 +274,7 @@ pytest --cov=aso_designer
 pytest tests/test_scoring.py -v
 ```
 
-The test suite includes 810+ tests covering all modules, with mocked
+The test suite includes 1025 tests covering all modules, with mocked
 ViennaRNA and NCBI calls for reproducibility.
 
 ## Programmatic Usage

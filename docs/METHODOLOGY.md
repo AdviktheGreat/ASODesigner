@@ -257,6 +257,14 @@ Candidates are classified by their thermodynamic profile:
 
 ### Transcriptome reference
 
+The k-mer index is cached persistently next to the FASTA
+(`<fasta>.k<k>.cache.json.gz`, keyed by FASTA SHA-256, k, and seed
+pattern), so repeat runs skip parsing and index building. Batch search
+can use a forked worker pool (`off_target.workers`), and the index k
+(8-20) plus an optional spaced-seed pattern are configurable; the spaced
+seed recovers 1-mismatch seed sites that a contiguous k-mer index misses
+by construction.
+
 ASODesigner builds a `TranscriptomeReference` from a set of transcript
 sequences. A k-mer index (default k=12) is constructed for fast
 seed-based searching. Each transcript is stored with its accession,
@@ -420,6 +428,19 @@ Region-based base score with center-of-transcript position bonus:
 A position bonus (up to 0.1) is added for candidates near the center
 of the transcript, decreasing linearly to 0 at the ends.
 
+#### 8. Isoform conservation (weight: 0.0, opt-in)
+
+Fraction of the binding window covered by sequence shared with every
+other fetched isoform of the gene (computed by the generation stage from
+`TranscriptSet.shared_regions` when 2+ isoforms were fetched). High
+coverage means the ASO hits all isoforms. Neutral 0.5 without isoform
+data; the component only influences ranking when given a positive weight
+(`scoring.weights.isoform_conservation`). Every candidate carries
+per-component data-completeness flags (`data_completeness` in the JSON
+output) distinguishing computed from neutral sub-scores, and
+`scoring.ignore_neutral_components` re-scores candidates using only
+components backed by real data (weights renormalized).
+
 ### Composite score
 
 $$\text{composite} = \sum_{i} w_i \times \text{score}_i$$
@@ -431,18 +452,40 @@ Where $w_i$ are the component weights (summing to 1.0) and
 
 ### Ranking and filtering
 
-Candidates are ranked by final score (descending). The pipeline
-supports:
+Candidates are ranked by final score (descending) with deterministic
+tie-breaking: equal final scores are ordered by thermodynamics,
+accessibility, off-target, variant, self-structure sub-scores, and
+sequence, and tied candidates share a `tie_group` (1 = best). The
+pipeline supports:
 
 - **Minimum score threshold** — Candidates below `min_score` are removed
 - **Top-N selection** — Keep only the top N candidates
 - **Rank assignment** — Each candidate gets a rank (1 = best)
+- **Pareto mode** — `scoring.rank_mode: pareto` ranks by non-dominated
+  sort over efficacy ((thermo+access)/2), specificity (off-target), and
+  safety ((variant+self-structure)/2) axes, front by front, then by
+  final score within each front
+- **Weight profiles** — `scoring.profile` (or `--profile` on the CLI)
+  swaps the whole weight vector: balanced (defaults), efficacy,
+  specificity, safety
+- **Calibration** — `asodesigner calibrate --csv` fits weights to
+  measured activity data via standardized ridge regression (pure
+  Python, no new dependencies), mapping coefficient magnitudes to
+  non-negative weights summing to 1.0
 
 ### Chemistry-aware adjustments
 
 Each chemistry preset can adjust:
 - Tm (additive correction)
-- Self-structure weight (multiplier on self-structure penalty)
-- Scoring bonus (additive to composite score)
+- Self-structure weight (multiplier that rescales the self-structure
+  weight, with the full weight vector renormalized to sum to 1.0)
+- Scoring bonus (additive to composite score, validated 0-0.2)
+- End-stability GC bounds for the pre-filter
+- RNase H eligibility (e.g. morpholino sets it to false)
 
-These are applied automatically based on the `--chemistry` flag.
+These are applied automatically based on the `--chemistry` flag. Gapmer
+geometry is strictly validated: candidate length must equal
+2 x wing_length + gap_size, checked at config load, design construction,
+and chemistry-design build time. PS/PO backbone patterns
+(per-linkage, default full-PS for gapmers) are recorded per candidate
+and surfaced in the CSV and FASTA reports.

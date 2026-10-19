@@ -57,19 +57,26 @@ cand = ASOCandidate(
 
 ### aso_designer.chemistry
 
-Chemistry modeling for gapmer, mixmer, 2'-OMe, MOE, and morpholino
-modification designs.
+Chemistry modeling for gapmer, mixmer, 2'-OMe, MOE, morpholino, and LNA
+modification designs, with PS/PO backbone patterns and an RNase H1
+positional cleavage-likelihood model.
 
 ```python
 from aso_designer.chemistry import create_chemistry_design
 
 design = create_chemistry_design("gapmer", length=20, dna_window=10)
 print(design.modification_pattern)  # ["MOE", "MOE", ..., "DNA", ..., "MOE", "MOE"]
+print(design.backbone)              # "ps"
+print(design.is_rnase_h_eligible)   # True
 ```
 
-**Classes:** `GapmerDesign`, `MixmerDesign`, `FullChemistryDesign`.
+**Classes:** `GapmerDesign`, `MixmerDesign`, `LnaDesign`,
+`FullChemistryDesign`, `CleavageProfile`.
 
 **Factory:** `create_chemistry_design(chemistry, length, **kwargs)`.
+
+**Functions:** `apply_chemistry()`, `backbone_label()`,
+`cleavage_likelihood()`, `compute_cleavage_profile()`.
 
 ### aso_designer.filters
 
@@ -199,19 +206,23 @@ Transcriptome-wide off-target search.
 ```python
 from aso_designer.off_target import TranscriptomeReference, OffTargetSearchEngine
 
-ref = TranscriptomeReference(kmer_size=12)
-ref.add_transcript("NM_001", "GENE1", "ATGCATGC...")
+ref = TranscriptomeReference(kmer_size=12, seed_pattern=None)
+ref.load_from_fasta("transcriptome.fna")  # caches the index next to the FASTA
 
-engine = OffTargetSearchEngine(ref)
-hits = engine.search("ATGCATGCATGCATGCATGC", max_mismatches=3)
-result = classify_and_filter_hits(hits, exclude_on_target=True)
+engine = OffTargetSearchEngine(ref, max_mismatches=3)
+hits = engine.search("ATGCATGCATGCATGCATGC")
+batch = engine.search_batch(seqs, workers=4)  # forked parallel search
 ```
 
 **Classes:** `TranscriptomeReference`, `OffTargetSearchEngine`,
 `OffTargetHit`, `OffTargetResult`.
 
 **Functions:** `calculate_off_target_score()`, `classify_specificity()`,
-`score_off_target()`, `score_off_target_batch()`.
+`score_off_target()`, `score_off_target_batch()`,
+`extract_spaced_kmer()`. `load_from_fasta(cache=True)` reuses a
+persistent gzipped-JSON index cache keyed by FASTA hash, k, and seed
+pattern; `seed_pattern` (e.g. `"1101011"`) enables spaced-seed retrieval
+of 1-mismatch seed sites.
 
 ### aso_designer.variant
 
@@ -247,24 +258,30 @@ Multi-factor scoring engine and ranking.
 from aso_designer.scoring import create_score_engine, score_rank_and_filter
 
 engine = create_score_engine()
-# Score with 7 components: accessibility, thermodynamics, gc_content,
-# off_target, variant, self_structure, positional
+# Score with 8 components: accessibility, thermodynamics, gc_content,
+# off_target, variant, self_structure, positional, isoform_conservation
+# (the last one registered only when given a weight)
 
 result = score_rank_and_filter(
     candidates, features_list, min_score=0.5, top_n=10
 )
 for c in result.candidates:
-    print(f"Rank {c.rank}: {c.sequence} score={c.final_score:.4f}")
+    print(f"Rank {c.rank}: {c.sequence} score={c.final_score:.4f} "
+          f"tie={c.tie_group} complete={c.data_completeness}")
 ```
 
 **Classes:** `ScoreContext`, `ScoreResult`, `CompositeScore`,
-`CandidateScore`, `RankingResult`, `ScoreEngine`, and 7 score
+`CandidateScore`, `RankingResult`, `ScoreEngine`, and 8 score
 component classes.
 
 **Functions:** `create_score_engine()`, `create_engine_from_config()`,
 `score_candidate()`, `score_candidates_batch()`, `rank_candidates()`,
-`filter_by_score()`, `rank_and_filter()`, `score_rank_and_filter()`,
-`build_features_dict()`.
+`rank_candidates_pareto()`, `derive_data_completeness()`,
+`rerank_ignoring_neutral()`, `filter_by_score()`, `rank_and_filter()`,
+`score_rank_and_filter()`, `build_features_dict()`. Ranking is
+deterministic (full secondary sort keys) and supports
+`rank_mode="pareto"`; `CandidateScore` carries `tie_group`,
+`backbone`, and `data_completeness`.
 
 ### aso_designer.reporting
 
@@ -365,9 +382,19 @@ print(config.scoring.weights.accessibility)  # 0.25
 Pydantic models for configuration validation.
 
 **Classes:** `ASOConfig`, `CandidateConfig`, `GapmerConfig`,
-`MixmerConfig`, `ScoringConfig`, `ScoringWeightsConfig`,
+`MixmerConfig`, `LnaConfig`, `ScoringConfig`, `ScoringWeightsConfig`,
 `ReportingConfig`, `AccessibilityConfig`, `ThermodynamicsConfig`,
 `OffTargetConfig`, `VariantConfig`.
+
+**Constants:** `WEIGHT_PROFILES` (balanced, efficacy, specificity,
+safety weight vectors used by `scoring.profile`).
+
+Notable fields: `ScoringConfig.profile`, `.rank_mode` (weighted|pareto),
+`.chemistry_bonus` (0-0.2), `.ignore_neutral_components`;
+`CandidateConfig.rnase_h_eligible` override and
+`.self_dimer_min_stretch`; `GapmerConfig.backbone` (ps|po);
+`OffTargetConfig.kmer_size` (8-20), `.seed_pattern`, `.index_cache`,
+`.workers`.
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Commands
 
-ASODesigner provides four CLI commands:
+ASODesigner provides five CLI commands:
 
 | Command | Description |
 |---|---|
@@ -10,6 +10,7 @@ ASODesigner provides four CLI commands:
 | `score` | Score pre-generated candidates from a JSON file |
 | `report` | Generate JSON/HTML reports from saved results |
 | `info` | Display configuration, weights, and presets |
+| `calibrate` | Recommend scoring weights from measured activity data (CSV) |
 
 ## design
 
@@ -37,7 +38,10 @@ Required:
 
 Common:
   --config PATH            YAML config file (overrides defaults)
-  --chemistry CHEM         ASO chemistry: gapmer, mixmer, 2ome, moe, morpholino
+  --chemistry CHEM         ASO chemistry: gapmer, mixmer, 2ome, moe,
+                           morpholino, lna
+  --profile PROFILE        Named scoring weight profile: balanced,
+                           efficacy, specificity, safety
   --organism ORG           Organism for NCBI lookup (default: Homo sapiens)
   --local-fasta PATH       Local FASTA file (bypasses NCBI)
   --transcriptome PATH     Transcriptome FASTA for off-target search
@@ -168,6 +172,45 @@ asodesigner info --show-presets
 
 # Show everything for a specific chemistry
 asodesigner info --chemistry mixmer --show-weights --show-presets
+```
+
+## calibrate
+
+Recommend scoring weights from measured ASO activity data.
+
+### Basic usage
+
+```bash
+asodesigner calibrate --csv results.csv
+```
+
+The CSV needs a header row with the seven component-score columns
+(`accessibility`, `thermodynamics`, `gc_content`, `off_target`,
+`variant`, `self_structure`, `positional`), a numeric `activity` column
+(higher = better, e.g. percent knockdown), and at least nine data rows.
+Extra columns are ignored.
+
+### Options
+
+```
+asodesigner calibrate --csv PATH [--ridge F] [--out PATH]
+
+  --csv PATH        CSV with component scores and measured activity
+  --ridge F         Ridge penalty (default 1.0; increase when component
+                    scores are collinear)
+  --out PATH        Optionally write a scoring weights YAML snippet
+```
+
+The command prints the recommended non-negative weights (summing to
+1.0), the fit quality (R²), and a warning when R² < 0.2. Pass `--out`
+to write a `scoring.weights` snippet you can paste into a config YAML.
+
+### Examples
+
+```bash
+# Fit weights and save them for future design runs
+asodesigner calibrate --csv screen_2026.csv --ridge 2.0 --out weights.yaml
+asodesigner design --target BRCA1 --config config_with_weights.yaml
 ```
 
 ## Output files

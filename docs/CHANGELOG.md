@@ -4,7 +4,71 @@ All notable changes to ASODesigner are documented in this file.
 
 ## [Unreleased]
 
+### Added (roadmap items 51-75)
+
+- Hybrid RNA/DNA nearest-neighbor thermodynamics for fully modified ASOs,
+  with per-chemistry parameter sets; Mg2+ concentration correction for
+  divalent-catalyzed hybridization; duplex ΔG defect terms for
+  mismatched/overhanging targets; and per-site LNA affinity adjustments
+  (+3.5 °C / −1.4 kcal/mol per LNA site, heuristic).
+- RNAup and multi-length RNAplfold accessibility methods; RNAfold
+  partition-function parsing (ensemble ΔG, base-pair probabilities, and
+  a `mean_pair_prob` binding-window feature).
+- New chemistry layer: LNA chemistry with configurable patterns;
+  per-linkage PS/PO backbone patterns surfaced in reports; strict gapmer
+  geometry validation (length = 2·wing + gap) enforced at config, design,
+  and build time; mixmer RNase H eligibility based on the longest
+  contiguous DNA run; an RNase H1 positional cleavage-likelihood model
+  (gap-size, within-gap, and junction effects) stored as candidate
+  features.
+- Self-dimer / 3'-self-complementarity screen (`aso_designer.dimer`,
+  RNAduplex homodimer + anchored-stretch scan); report-only by default,
+  opt-in rejection via `candidate.self_dimer_min_stretch`.
+- Scoring: deterministic tie-breaking with tie groups; Pareto ranking
+  mode (`scoring.rank_mode`); named weight profiles
+  (`--profile balanced|efficacy|specificity|safety`); `chemistry_bonus`
+  as a validated schema field honored by the pipeline engine; optional
+  `ignore_neutral_components` re-ranking using only components with real
+  data, with per-candidate data-completeness flags in the JSON output;
+  an isoform-conservation component driven by `TranscriptSet.
+  shared_regions` over fetched gene isoforms.
+- Chemistry presets now fully applied: `self_structure_weight_adjust`
+  rescales and renormalizes the weight vector, and the morpholino
+  `rnase_h_eligible: false` flag overrides design-derived eligibility.
+  (Also repaired the presets file, whose duplicated top-level keys had
+  silently replaced the mixmer/2ome/moe/morpholino/lna presets with
+  end-GC-only stubs.)
+- End-stability filter bounds per chemistry from the presets.
+- Off-target: persistent gzipped-JSON index cache keyed by FASTA
+  SHA-256, k, and seed pattern; optional multiprocessing over a forked
+  worker pool (`off_target.workers`); configurable index k (8-20) and an
+  optional spaced-seed pattern that recovers 1-mismatch seed sites the
+  contiguous index misses.
+- `calibrate` CLI subcommand and `aso_designer.calibration`: ridge
+  regression of measured activity on component scores from a CSV,
+  producing non-negative weights summing to 1.0 (optionally written as
+  a YAML snippet).
+- CLI `--profile` argument on all subcommands.
+
+### Changed (roadmap items 51-75)
+
+- `apply_chemistry` is now actually invoked by the pipeline generation
+  stage: candidates carry real modification/backbone patterns, RNase H
+  eligibility, and cleavage features (previously empty in production
+  flow).
+- Gapmer/mixmer/full-chemistry designs are frozen dataclasses; invalid
+  geometry raises instead of silently mutating the gap size.
+- Removed the dead `ASOCandidate.scores` field (scoring results live on
+  `CandidateScore`); legacy serialized payloads load cleanly.
+- The pipeline off-target stage routes through `search_batch` instead of
+  per-candidate `engine.search` calls.
+
+### Tests (roadmap items 51-75)
+
+- Grew from 938 to 1025 tests with targeted suites per item.
+
 ### Fixed
+
 
 - Removed the invalid `full` chemistry from the CLI choices and docs;
   it was never supported by the chemistry factory.
