@@ -1,12 +1,16 @@
 """Tests for thermodynamic calculations (Tm, ΔG, self-structure, net binding)."""
 
+import math
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aso_designer.thermodynamics import (
+    _HYBRID_INIT,
+    _HYBRID_NN,
     _RNA_NN,
     DuplexResult,
+    R,
     SelfStructureResult,
     TargetStructureResult,
     ThermodynamicSummary,
@@ -164,6 +168,133 @@ class TestCalculateNNThermodynamics:
         info_before = calculate_nn_thermodynamics.cache_info().hits
         calculate_nn_thermodynamics(seq)
         assert calculate_nn_thermodynamics.cache_info().hits == info_before + 1
+
+
+class TestHybridNN:
+    """RNA/DNA hybrid NN parameters (Banerjee et al. 2020, corrigendum 2021)."""
+
+    def test_hybrid_table_values(self):
+        """All 16 published 1 M NaCl hybrid stacks must match exactly.
+
+        Source: Banerjee et al. (2020) NAR 48:12042-12055, Supplementary
+        Table S3 ("parameters calculated by new program"), as revised by
+        the corrigendum (NAR 2021, 49:10796).
+        """
+        expected = {
+            "AA": (-7.5, -21.0),  # rAA/dTT
+            "AC": (-8.5, -21.6),  # rAC/dGT
+            "AG": (-8.6, -22.6),  # rAG/dCT
+            "AU": (-7.5, -21.9),  # rAU/dAT
+            "CA": (-8.4, -22.9),  # rCA/dTG
+            "CC": (-7.9, -19.0),  # rCC/dGG
+            "CG": (-14.8, -41.6),  # rCG/dCG
+            "CU": (-4.4, -10.6),  # rCU/dAG
+            "GA": (-9.4, -24.5),  # rGA/dTC
+            "GC": (-10.5, -25.5),  # rGC/dGC
+            "GG": (-12.5, -31.6),  # rGG/dCC
+            "GU": (-9.5, -25.8),  # rGU/dAC
+            "UA": (-9.5, -28.4),  # rUA/dTA
+            "UC": (-8.1, -22.2),  # rUC/dGA
+            "UG": (-8.6, -23.2),  # rUG/dCA
+            "UU": (-5.6, -16.8),  # rUU/dAA
+        }
+        assert set(_HYBRID_NN) == set(expected)
+        for pair, (dh, ds) in expected.items():
+            assert _HYBRID_NN[pair][0] == pytest.approx(dh, abs=1e-9), f"{pair} ΔH"
+            assert _HYBRID_NN[pair][1] == pytest.approx(ds, abs=1e-9), f"{pair} ΔS"
+
+    def test_hybrid_gibbs_consistency(self):
+        """ΔG°37 = ΔH − 310.15·ΔS/1000 must hold for every published pair."""
+        for pair, (dh, ds) in _HYBRID_NN.items():
+            dg37 = dh - 310.15 * ds / 1000.0
+            assert -2.9 < dg37 < 0.3, f"{pair} ΔG37 out of published range: {dg37}"
+        dg_init = _HYBRID_INIT[0] - 310.15 * _HYBRID_INIT[1] / 1000.0
+        assert dg_init == pytest.approx(3.1, abs=0.05)
+
+    def test_hybrid_worked_example(self):
+        """Hand-computed sum for ASO ATGCATGC.
+
+        RNA target strand = revcomp(ATGCATGC) = GCATGCAT → GCAUGCAU.
+        Stacks: GC, CA, AU, UG, GC, CA, AU (7 pairs).
+        ΔH = 2(-10.5) + 2(-8.4) + 2(-7.5) + (-8.6) + 1.9 = -59.5
+        ΔS = 2(-25.5) + 2(-22.9) + 2(-21.9) + (-23.2) + (-3.9) = -167.7
+        """
+        dh, ds = calculate_nn_thermodynamics("ATGCATGC", hybrid=True)
+        assert dh == pytest.approx(-59.5, abs=1e-9)
+        assert ds == pytest.approx(-167.7, abs=1e-9)
+
+    def test_hybrid_strand_orientation_matters(self):
+        """The table is not revcomp-symmetric: poly-A and poly-T ASOs
+        must give different sums, with poly-A more stable (rAA/dTT stacks
+        are stronger than rUU/dAA stacks)."""
+        dh_a, ds_a = calculate_nn_thermodynamics("AAAA", hybrid=True)
+        dh_t, ds_t = calculate_nn_thermodynamics("TTTT", hybrid=True)
+        # AAAA → RNA strand UUUU → 3×(rUU/dAA); TTTT → RNA strand AAAA →
+        # 3×(rAA/dTT).
+        assert dh_a == pytest.approx(3 * _HYBRID_NN["UU"][0] + _HYBRID_INIT[0])
+        assert dh_t == pytest.approx(3 * _HYBRID_NN["AA"][0] + _HYBRID_INIT[0])
+        assert dh_t < dh_a  # rAA/dTT stacks more stable
+        assert ds_a > ds_t  # ...and releases more entropy (more negative ΔS)
+
+    def test_hybrid_all_dinucleotides(self):
+        """Every DNA dinucleotide must be accepted by the hybrid model."""
+        for a in "ACGT":
+            for b in "ACGT":
+                dh, ds = calculate_nn_thermodynamics(a + b, hybrid=True)
+                assert dh < 0
+
+    def test_hybrid_tm_treats_duplex_as_non_self_complementary(self):
+        """Palindromic ASOs still use the concentration factor x=4."""
+        seq = "ATGCAT"  # self-complementary as DNA
+        dh, ds = calculate_nn_thermodynamics(seq, hybrid=True)
+        na, ct = 0.1, 1.0e-6
+        ds_corr = ds + 0.368 * (len(seq) - 1) * math.log(na)
+        expected = (dh * 1000) / (ds_corr + R * math.log(ct / 4)) - 273.15
+        assert calculate_tm(seq, na_conc=na, oligo_conc=ct, hybrid=True) == pytest.approx(expected)
+
+    def test_hybrid_tm_differs_from_dna_and_rna(self):
+        seq = "ATGCATGCATGCATGC"
+        tm_hybrid = calculate_tm(seq, hybrid=True)
+        tm_dna = calculate_tm(seq, rna=False)
+        tm_rna = calculate_tm(seq, rna=True)
+        assert tm_hybrid != pytest.approx(tm_dna)
+        assert tm_hybrid != pytest.approx(tm_rna)
+
+
+class TestHybridChemistryRouting:
+    """Chemistry → NN parameter-set routing."""
+
+    SEQ = "ATGCATGCATGCATGC"
+
+    @pytest.mark.parametrize("chemistry", ["gapmer", "mixmer", "morpholino"], ids=str)
+    def test_hybrid_chemistries_use_hybrid_params(self, chemistry):
+        expected = calculate_tm(self.SEQ, hybrid=True) + get_chemistry_tm_adjustment(chemistry)
+        assert calculate_tm_with_chemistry(self.SEQ, chemistry=chemistry) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("chemistry", ["2ome", "moe"], ids=str)
+    def test_rna_chemistries_use_rna_params(self, chemistry):
+        expected = calculate_tm(self.SEQ, rna=True) + get_chemistry_tm_adjustment(chemistry)
+        assert calculate_tm_with_chemistry(self.SEQ, chemistry=chemistry) == pytest.approx(expected)
+
+    def test_hybrid_tms_differ_from_dna_routing(self):
+        """Gapmer Tm changed when routing moved from DNA to hybrid params."""
+        hybrid_tm = calculate_tm(self.SEQ, hybrid=True) + get_chemistry_tm_adjustment("gapmer")
+        dna_tm = calculate_tm(self.SEQ, rna=False) + get_chemistry_tm_adjustment("gapmer")
+        assert hybrid_tm != pytest.approx(dna_tm)
+        # The hybrid duplex is less stable than the DNA/DNA duplex here
+        assert hybrid_tm < dna_tm
+
+    def test_duplex_nn_uses_hybrid_for_gapmer(self):
+        r = calculate_duplex_dg_nn(self.SEQ, chemistry="gapmer")
+        assert r.dg_duplex == pytest.approx(calculate_dg(self.SEQ, hybrid=True))
+        r_2ome = calculate_duplex_dg_nn(self.SEQ, chemistry="2ome")
+        assert r_2ome.dg_duplex == pytest.approx(calculate_dg(self.SEQ, rna=True))
+
+    def test_self_structure_keeps_same_strand_params(self):
+        """Self-structure models ASO:ASO duplexing (not ASO:RNA), so a
+        gapmer must use DNA/DNA parameters, not hybrid ones."""
+        result = calculate_self_structure_dg_nn(self.SEQ, chemistry="gapmer")
+        assert result.dg_self == pytest.approx(0.3 * calculate_dg(self.SEQ, rna=False))
 
 
 class TestViennaDiskCache:

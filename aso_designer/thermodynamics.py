@@ -3,9 +3,11 @@
 Implements nearest-neighbor (NN) model for melting temperature (Tm)
 prediction, duplex ΔG, self-structure ΔG, target structure ΔG, and
 net binding energy. Uses SantaLucia 1998 unified NN parameters for
-DNA/DNA and Turner 2004 parameters for RNA/RNA duplexes. ViennaRNA
-tools (RNAfold, RNAduplex, RNAcofold) are used for structure-based
-ΔG calculations where the NN model is insufficient.
+DNA/DNA, Turner 2004 parameters for RNA/RNA, and the Banerjee et al.
+2020 (corrigendum 2021) RNA/DNA hybrid parameters for DNA-containing
+ASOs binding RNA targets. ViennaRNA tools (RNAfold, RNAduplex,
+RNAcofold) are used for structure-based ΔG calculations where the NN
+model is insufficient.
 
 Scientific note: Tm and ΔG values are computational predictions for
 candidate ranking, not experimental measurements. The NN model
@@ -214,9 +216,72 @@ _RNA_AU_END = (3.72, 10.5)
 # ΔG°37 = +0.43 kcal/mol, ΔH = 0 → ΔS = −1.4 cal/(mol·K)
 _RNA_SYMMETRY = (0.0, -1.4)
 
+# ---------------------------------------------------------------------------
+# RNA/DNA hybrid NN parameters (RNA target strand paired with DNA ASO strand)
+# Reference: Banerjee et al. (2020) Nucleic Acids Res 48:12042-12055,
+# "Improved nearest-neighbor parameters for the stability of RNA/DNA hybrids
+# under a physiological condition", with the corrigendum (NAR 2021, 49:10796,
+# gkab780) that recalculated ΔS values. Values are the re-derived 1 M NaCl
+# parameter set (Supplementary Table S3, "parameters calculated by new
+# program" column, corrigendum revision); ΔS values follow the same
+# Gibbs-relation convention as the RNA table above.
+# Units: ΔH in kcal/mol, ΔS in cal/(mol·K).
+# Key format: "XY" = RNA strand 5'-X Y-3' paired with the antiparallel DNA
+# strand (e.g. "AG" = rAG/dCT). Unlike the DNA and RNA tables this set is
+# NOT reverse-complement symmetric, so all 16 keys are independent entries.
+# Model notes (per the publication):
+# - A single helix-initiation term applies to every duplex (no separate
+#   terminal GC/AT initiation and no terminal AU penalty; the paper found an
+#   explicit terminal rA-dT term did not improve predictions).
+# - No symmetry correction: an RNA/DNA hybrid is never self-complementary
+#   (the two strands are chemically different), consistent with the paper's
+#   Tm fits using ln(Ct/4).
+# ---------------------------------------------------------------------------
 
-def _get_nn_params(rna: bool = False) -> dict[str, tuple[float, float]]:
-    """Return the appropriate NN parameter table."""
+_HYBRID_NN: dict[str, tuple[float, float]] = {
+    # NN pair on the RNA strand (5'-3'), paired with DNA (3'-5'): (ΔH, ΔS)
+    "AA": (-7.5, -21.0),  # rAA/dTT
+    "AC": (-8.5, -21.6),  # rAC/dGT
+    "AG": (-8.6, -22.6),  # rAG/dCT
+    "AU": (-7.5, -21.9),  # rAU/dAT
+    "CA": (-8.4, -22.9),  # rCA/dTG
+    "CC": (-7.9, -19.0),  # rCC/dGG
+    "CG": (-14.8, -41.6),  # rCG/dCG
+    "CU": (-4.4, -10.6),  # rCU/dAG
+    "GA": (-9.4, -24.5),  # rGA/dTC
+    "GC": (-10.5, -25.5),  # rGC/dGC
+    "GG": (-12.5, -31.6),  # rGG/dCC
+    "GU": (-9.5, -25.8),  # rGU/dAC
+    "UA": (-9.5, -28.4),  # rUA/dTA
+    "UC": (-8.1, -22.2),  # rUC/dGA
+    "UG": (-8.6, -23.2),  # rUG/dCA
+    "UU": (-5.6, -16.8),  # rUU/dAA
+}
+
+# Helix initiation for RNA/DNA hybrids (1 M NaCl):
+# ΔH = +1.9 kcal/mol, ΔG°37 = +3.1 kcal/mol
+#   → ΔS = (1.9 − 3.1) × 1000 / 310.15 = −3.9 cal/(mol·K)
+_HYBRID_INIT = (1.9, -3.9)
+
+# Complement map used to derive the RNA target strand from a DNA ASO
+# sequence: the RNA strand antiparallel to a DNA 5'→3' strand, read in its
+# own 5'→3' direction, is the DNA strand's reverse complement (with T→U).
+_DNA_COMPLEMENT = str.maketrans("ACGT", "TGCA")
+
+
+def _get_nn_params(rna: bool = False, hybrid: bool = False) -> dict[str, tuple[float, float]]:
+    """Return the appropriate NN parameter table.
+
+    Parameters
+    ----------
+    rna : bool
+        RNA/RNA table (Turner 2004).
+    hybrid : bool
+        RNA/DNA hybrid table (Banerjee et al. 2020). Takes precedence
+        over ``rna`` when True.
+    """
+    if hybrid:
+        return _HYBRID_NN
     return _RNA_NN if rna else _DNA_NN
 
 
@@ -241,22 +306,30 @@ def _is_self_complementary(sequence: str, rna: bool = False) -> bool:
 def calculate_nn_thermodynamics(
     sequence: str,
     rna: bool = False,
+    hybrid: bool = False,
 ) -> tuple[float, float]:
     """Calculate total ΔH and ΔS using the nearest-neighbor model.
 
     Sums nearest-neighbor stacking enthalpies and entropies, plus
     initiation and symmetry corrections. Results are memoized per
-    (sequence, rna) pair — batch scoring of sliding-window candidates
-    calls this repeatedly with overlapping sequences, so caching
-    eliminates redundant computation.
+    (sequence, rna, hybrid) triple — batch scoring of sliding-window
+    candidates calls this repeatedly with overlapping sequences, so
+    caching eliminates redundant computation.
 
     Parameters
     ----------
     sequence : str
-        Oligonucleotide sequence (DNA or RNA alphabet).
+        Oligonucleotide sequence. DNA alphabet for DNA/DNA and hybrid
+        models; DNA or RNA alphabet for the RNA model (T → U converted).
     rna : bool
         If True, use RNA/RNA NN parameters (Turner 2004).
         If False, use DNA/DNA NN parameters (SantaLucia 1998).
+    hybrid : bool
+        If True, use RNA/DNA hybrid NN parameters (Banerjee et al.
+        2020) for an ASO:target-RNA duplex. Takes precedence over
+        ``rna``. The table is keyed on the RNA target strand, so the
+        RNA strand 5'→3' (the reverse complement of the ASO, T → U)
+        is what the stacking sum runs over.
 
     Returns
     -------
@@ -269,16 +342,37 @@ def calculate_nn_thermodynamics(
         If the sequence is too short or contains invalid NN pairs.
     """
     seq = sequence.upper()
-    if rna:
+    if rna and not hybrid:
         seq = seq.replace("T", "U")
 
     if len(seq) < 2:
         raise ThermodynamicsError(f"Sequence too short for NN calculation: {len(seq)} nt")
 
-    nn_params = _get_nn_params(rna)
+    nn_params = _get_nn_params(rna, hybrid)
 
     total_h = 0.0
     total_s = 0.0
+
+    if hybrid:
+        # RNA/DNA hybrid duplex. The published parameters are defined on
+        # the RNA (target) strand, so convert the DNA ASO 5'→3' sequence
+        # to its antiparallel RNA target strand read 5'→3' (reverse
+        # complement, T→U) and sum stacks over that strand.
+        rna_strand = seq.translate(_DNA_COMPLEMENT)[::-1].replace("T", "U")
+        for i in range(len(rna_strand) - 1):
+            nn = rna_strand[i : i + 2]
+            if nn not in nn_params:
+                raise ThermodynamicsError(
+                    f"Invalid nearest-neighbor pair: {nn} in sequence {rna_strand}"
+                )
+            h, s = nn_params[nn]
+            total_h += h
+            total_s += s
+        # Single helix-initiation term; no terminal or symmetry corrections
+        # (see the table notes above).
+        total_h += _HYBRID_INIT[0]
+        total_s += _HYBRID_INIT[1]
+        return total_h, total_s
 
     # Sum NN stacking parameters
     for i in range(len(seq) - 1):
@@ -344,6 +438,7 @@ def calculate_tm(
     oligo_conc: float = 1.0e-6,
     rna: bool = False,
     salt_correction: str = "santalucia",
+    hybrid: bool = False,
 ) -> float:
     """Calculate the melting temperature (Tm) using the NN model.
 
@@ -368,6 +463,9 @@ def calculate_tm(
         If True, use RNA/RNA NN parameters.
     salt_correction : str
         Salt correction method: "santalucia" (1998) or "log10" (simple).
+    hybrid : bool
+        If True, use RNA/DNA hybrid NN parameters. The concentration
+        factor x is 4 (hybrid duplexes are never self-complementary).
 
     Returns
     -------
@@ -378,16 +476,23 @@ def calculate_tm(
     ------
     ThermodynamicsError
         If NN calculation fails or salt correction is unknown.
+
+    Notes
+    -----
+    The SantaLucia ΔS salt correction was derived for DNA/DNA duplexes;
+    applying it to hybrid or RNA parameters is an extrapolation kept for
+    consistency until a hybrid-specific salt model is adopted (see the
+    RNA/DNA hybrid table notes).
     """
     import math
 
-    dh, ds = calculate_nn_thermodynamics(sequence, rna=rna)
+    dh, ds = calculate_nn_thermodynamics(sequence, rna=rna, hybrid=hybrid)
 
     # Symmetry factor: 1 for self-complementary, 4 otherwise
     seq = sequence.upper()
-    if rna:
+    if rna and not hybrid:
         seq = seq.replace("T", "U")
-    is_self_comp = _is_self_complementary(seq, rna=rna)
+    is_self_comp = False if hybrid else _is_self_complementary(seq, rna=rna)
     x = 1 if is_self_comp else 4
 
     # Tm at 1 M NaCl
@@ -425,6 +530,7 @@ def calculate_dg(
     sequence: str,
     temperature: float = DEFAULT_TEMPERATURE_C,
     rna: bool = False,
+    hybrid: bool = False,
 ) -> float:
     """Calculate ΔG at a given temperature using the NN model.
 
@@ -440,13 +546,16 @@ def calculate_dg(
         Temperature in °C (default 37 °C).
     rna : bool
         If True, use RNA/RNA NN parameters.
+    hybrid : bool
+        If True, use RNA/DNA hybrid NN parameters (takes precedence
+        over ``rna``).
 
     Returns
     -------
     float
         ΔG in kcal/mol (negative = favorable).
     """
-    dh, ds = calculate_nn_thermodynamics(sequence, rna=rna)
+    dh, ds = calculate_nn_thermodynamics(sequence, rna=rna, hybrid=hybrid)
     t_kelvin = temperature + 273.15
     # ΔS is in cal/(mol·K), ΔH is in kcal/mol → convert ΔS to kcal
     dg = dh - (t_kelvin * ds / 1000.0)
@@ -459,6 +568,10 @@ def calculate_dg(
 
 # Chemistry types that use RNA NN parameters (target is RNA, ASO is RNA-like)
 _RNA_CHEMISTRIES = {"2ome", "moe"}
+# Chemistry types that form an RNA/DNA hybrid duplex with the RNA target
+# (DNA-containing ASOs: DNA gap gapmers, mixed DNA/modified mixmers, and the
+# DNA-like morpholino backbone). See _HYBRID_NN for the parameter source.
+_HYBRID_CHEMISTRIES = {"gapmer", "mixmer", "morpholino"}
 
 
 def get_chemistry_tm_adjustment(chemistry: str) -> float:
@@ -493,8 +606,11 @@ def calculate_tm_with_chemistry(
     """Calculate Tm with chemistry-specific NN parameters and adjustment.
 
     Selects the appropriate NN parameter set based on chemistry:
-    - 2'OMe, MOE: RNA NN parameters (ASO is RNA-like, binds RNA target)
-    - Gapmer, mixmer, morpholino: DNA NN parameters (DNA or DNA-like backbone)
+    - 2'OMe, MOE: RNA/RNA NN parameters (ASO is RNA-like, binds RNA target)
+    - Gapmer, mixmer, morpholino: RNA/DNA hybrid NN parameters (the ASO
+      carries a DNA-like backbone and pairs with the RNA target)
+    - RNA/DNA hybrid calculations use the Banerjee et al. (2020) 1 M NaCl
+      parameter set; see _HYBRID_NN.
 
     Then applies the chemistry-specific Tm adjustment from presets.
 
@@ -515,11 +631,13 @@ def calculate_tm_with_chemistry(
         Adjusted Tm in °C.
     """
     use_rna = chemistry in _RNA_CHEMISTRIES
+    use_hybrid = chemistry in _HYBRID_CHEMISTRIES
     base_tm = calculate_tm(
         sequence,
         na_conc=na_conc,
         oligo_conc=oligo_conc,
         rna=use_rna,
+        hybrid=use_hybrid,
     )
     adjustment = get_chemistry_tm_adjustment(chemistry)
     adjusted_tm = base_tm + adjustment
@@ -687,12 +805,16 @@ def calculate_duplex_dg_nn(
     complement. This is faster than RNAduplex but does not account
     for imperfect matches or bulges.
 
+    The duplex modeled here is ASO:target-RNA, so chemistry routing
+    uses the RNA/DNA hybrid parameters for DNA-like ASO chemistries
+    (see ``_HYBRID_CHEMISTRIES``) and RNA parameters for RNA-like ones.
+
     Parameters
     ----------
     aso_sequence : str
         ASO sequence (DNA alphabet).
     chemistry : str
-        Chemistry name (determines RNA vs DNA NN parameters).
+        Chemistry name (determines hybrid vs RNA vs DNA NN parameters).
     temperature : float
         Temperature in °C (default 37 °C).
 
@@ -702,7 +824,8 @@ def calculate_duplex_dg_nn(
         Duplex ΔG (NN-based).
     """
     use_rna = chemistry in _RNA_CHEMISTRIES
-    dg = calculate_dg(aso_sequence, temperature=temperature, rna=use_rna)
+    use_hybrid = chemistry in _HYBRID_CHEMISTRIES
+    dg = calculate_dg(aso_sequence, temperature=temperature, rna=use_rna, hybrid=use_hybrid)
     return DuplexResult(
         aso_sequence=aso_sequence.upper(),
         target_sequence="",
@@ -867,6 +990,10 @@ def calculate_self_structure_dg_nn(
     SelfStructureResult
         Self-structure ΔG (NN-based, no structure).
     """
+    # Self-structure models the ASO duplexing with *itself* (ASO:ASO), so
+    # same-strand parameters apply: DNA/DNA for DNA-like chemistries,
+    # RNA/RNA for RNA-like ones — NOT the RNA/DNA hybrid table, which
+    # describes ASO:target-RNA duplexes only.
     use_rna = chemistry in _RNA_CHEMISTRIES
     dg = calculate_dg(aso_sequence, temperature=temperature, rna=use_rna)
     dg_self = dg * nn_fraction
