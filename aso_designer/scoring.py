@@ -386,6 +386,7 @@ class CandidateScore:
     rank: int | None = None
     features: dict[str, Any] = field(default_factory=dict)
     backbone: str = ""
+    tie_group: int | None = None
 
     @property
     def component_scores(self) -> dict[str, float]:
@@ -402,6 +403,7 @@ class CandidateScore:
             "backbone": self.backbone,
             "final_score": round(self.final_score, 4),
             "rank": self.rank,
+            "tie_group": self.tie_group,
             "component_scores": {
                 r.component_name: round(r.raw_score, 4)
                 for r in self.composite_score.component_results
@@ -1001,10 +1003,14 @@ def rank_candidates(
     scored: list[CandidateScore],
     descending: bool = True,
 ) -> list[CandidateScore]:
-    """Rank scored candidates by final score.
+    """Rank scored candidates by final score with deterministic tie-breaks.
 
-    Assigns rank (1 = best) to each candidate and returns them
-    sorted by score.
+    Candidates are sorted by final_score; ties are broken by component
+    quality in a fixed order (thermodynamics, then accessibility, then
+    lower off-target, then lower variant penalty, then the sequence
+    itself), so identical inputs always produce identical ordering.
+    Candidates sharing an equal final score are marked with a shared
+    ``tie_group`` (singles get their own group); ranks remain distinct.
 
     Parameters
     ----------
@@ -1017,15 +1023,33 @@ def rank_candidates(
     Returns
     -------
     list[CandidateScore]
-        Sorted and ranked candidates.
+        Sorted and ranked candidates with ``tie_group`` assigned.
     """
-    sorted_scored = sorted(
-        scored,
-        key=lambda c: c.final_score,
-        reverse=descending,
-    )
+
+    def sort_key(c: CandidateScore) -> tuple:
+        components = c.component_scores
+        return (
+            -c.final_score if descending else c.final_score,
+            -components.get("thermodynamics", 0.0),
+            -components.get("accessibility", 0.0),
+            components.get("off_target", 0.0),
+            components.get("variant", 0.0),
+            c.sequence,
+        )
+
+    sorted_scored = sorted(scored, key=sort_key)
     for i, cand in enumerate(sorted_scored):
         cand.rank = i + 1
+
+    # Assign tie groups over equal final scores (exact float equality;
+    # scores come from the same arithmetic pipeline within a run).
+    group = 0
+    previous: float | None = None
+    for cand in sorted_scored:
+        if previous is None or cand.final_score != previous:
+            group += 1
+            previous = cand.final_score
+        cand.tie_group = group
     return sorted_scored
 
 

@@ -986,3 +986,76 @@ class TestScoreRankAndFilter:
         result = score_rank_and_filter(cands, features)
         assert result.ranked_candidates == 2
         assert result.candidates[0].rank == 1
+
+
+# ---------------------------------------------------------------------------
+# Deterministic tie-breaking
+# ---------------------------------------------------------------------------
+
+
+class TestRankCandidatesTieBreaking:
+    def _candidate(self, seq, final, thermo, access, off=0.5):
+        from aso_designer.scoring import CandidateScore, CompositeScore, ScoreResult
+
+        results = [
+            ScoreResult(
+                component_name="thermodynamics",
+                raw_score=thermo,
+                weight=0.2,
+                weighted_score=thermo * 0.2,
+            ),
+            ScoreResult(
+                component_name="accessibility",
+                raw_score=access,
+                weight=0.25,
+                weighted_score=access * 0.25,
+            ),
+            ScoreResult(
+                component_name="off_target", raw_score=off, weight=0.2, weighted_score=off * 0.2
+            ),
+        ]
+        composite = CompositeScore(
+            component_results=results, composite_score=final, chemistry_bonus=0.0, final_score=final
+        )
+        return CandidateScore(
+            sequence=seq,
+            start=0,
+            end=len(seq),
+            chemistry="gapmer",
+            composite_score=composite,
+            final_score=final,
+        )
+
+    def test_ties_broken_by_secondary_keys(self):
+        a = self._candidate("AAA", 0.8, thermo=0.9, access=0.5)
+        b = self._candidate("CCC", 0.8, thermo=0.7, access=0.9)
+        ranked = rank_candidates([b, a])
+        assert ranked[0].sequence == "AAA"  # higher thermo wins the tie
+        assert [c.rank for c in ranked] == [1, 2]
+
+    def test_full_determinism_regardless_of_input_order(self):
+        cands = [
+            self._candidate("AAA", 0.8, 0.5, 0.5),
+            self._candidate("CCC", 0.8, 0.5, 0.5),
+            self._candidate("GGG", 0.8, 0.5, 0.5),
+        ]
+        out1 = rank_candidates(list(reversed(cands)))
+        out2 = rank_candidates(list(cands))
+        assert [c.sequence for c in out1] == [c.sequence for c in out2]
+
+    def test_tie_groups_marked(self):
+        a = self._candidate("AAA", 0.8, 0.9, 0.5)
+        b = self._candidate("CCC", 0.8, 0.7, 0.9)
+        c = self._candidate("GGG", 0.5, 0.9, 0.9)
+        ranked = rank_candidates([c, b, a])
+        assert ranked[0].tie_group == ranked[1].tie_group == 1
+        assert ranked[2].tie_group == 2
+        # to_dict carries it
+        assert "tie_group" in ranked[0].to_dict()
+
+    def test_distinct_scores_distinct_groups(self):
+        a = self._candidate("AAA", 0.9, 0.5, 0.5)
+        b = self._candidate("CCC", 0.8, 0.5, 0.5)
+        ranked = rank_candidates([b, a])
+        assert ranked[0].tie_group == 1
+        assert ranked[1].tie_group == 2
