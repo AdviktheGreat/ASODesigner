@@ -284,6 +284,13 @@ class OffTargetConfig(BaseModel):
             "(keyed by FASTA hash and k) and reuse it on repeat runs."
         ),
     )
+    workers: conint(ge=0, le=64) = Field(
+        default=0,
+        description=(
+            "Worker processes for off-target search (0 or 1 = serial). "
+            "Uses forked processes sharing the in-memory index."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_seed_range(self) -> "OffTargetConfig":

@@ -70,6 +70,16 @@ class TranscriptEntry:
         )
 
 
+def _fork_available() -> bool:
+    """True when the fork start method is usable on this platform."""
+    import multiprocessing
+
+    try:
+        return "fork" in multiprocessing.get_all_start_methods()
+    except (ImportError, ValueError):  # pragma: no cover - exotic platforms
+        return False
+
+
 def _fasta_sha256(path: Path) -> str:
     """SHA-256 of the FASTA bytes, read in chunks."""
     digest = hashlib.sha256()
@@ -546,6 +556,7 @@ class OffTargetSearchEngine:
         aso_sequences: list[str],
         on_target_transcripts: list[str | None] | None = None,
         on_target_positions: list[int | None] | None = None,
+        workers: int = 0,
     ) -> dict[int, list[OffTargetHit]]:
         """Search for off-targets for multiple ASO candidates.
 
@@ -568,14 +579,79 @@ class OffTargetSearchEngine:
         if on_target_positions is None:
             on_target_positions = [None] * len(aso_sequences)
 
+        tasks = [
+            (i, seq, on_target_transcripts[i], on_target_positions[i])
+            for i, seq in enumerate(aso_sequences)
+        ]
+
+        if workers > 1 and len(tasks) >= 4 and _fork_available():
+            parallel = self._search_batch_parallel(tasks, workers)
+            if parallel is not None:
+                return dict(parallel)
+            # Fall through to serial search if pool startup failed.
+
         results: dict[int, list[OffTargetHit]] = {}
-        for i, seq in enumerate(aso_sequences):
+        for i, seq, ot, op in tasks:
             results[i] = self.search(
                 seq,
-                on_target_transcript=on_target_transcripts[i],
-                on_target_position=on_target_positions[i],
+                on_target_transcript=ot,
+                on_target_position=op,
             )
         return results
+
+    def _search_batch_parallel(
+        self, tasks: list[tuple], workers: int
+    ) -> list[tuple[int, list[OffTargetHit]]] | None:
+        """Run the search tasks in a forked worker pool.
+
+        Returns None (and leaves results to the serial path) when the
+        platform lacks fork support or pool startup fails.
+        """
+        global _SHARED_ENGINE
+        import multiprocessing
+
+        if "fork" not in multiprocessing.get_all_start_methods():
+            return None
+        try:
+            ctx = multiprocessing.get_context("fork")
+            self.reference.ensure_index()
+            _SHARED_ENGINE = self
+            try:
+                with ctx.Pool(processes=min(workers, len(tasks))) as pool:
+                    chunk = max(1, len(tasks) // (workers * 4))
+                    return pool.map(_search_worker, tasks, chunksize=chunk)
+            finally:
+                _SHARED_ENGINE = None
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.warning(
+                "Parallel off-target search unavailable (%s); using serial search.",
+                e,
+            )
+            return None
+
+
+# ---------------------------------------------------------------------------
+# Parallel batch search (fork-based worker pool)
+# ---------------------------------------------------------------------------
+
+# The worker pool inherits the engine through fork; the task payload
+# carries only small per-candidate data, never the index itself.
+_SHARED_ENGINE: OffTargetSearchEngine | None = None
+
+
+def _search_worker(task):
+    """Search one candidate in a forked worker; returns (index, hits)."""
+    index, seq, on_target_transcript, on_target_position = task
+    engine = _SHARED_ENGINE
+    assert engine is not None
+    return (
+        index,
+        engine.search(
+            seq,
+            on_target_transcript=on_target_transcript,
+            on_target_position=on_target_position,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

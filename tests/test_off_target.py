@@ -1,5 +1,7 @@
 """Tests for off-target analysis (reference, search, scoring)."""
 
+import random
+
 import pytest
 
 from aso_designer.off_target import (
@@ -628,3 +630,69 @@ def test_index_cache_disabled(tmp_path):
     ref.load_from_fasta(fasta, cache=False)
     ref.ensure_index()
     assert not (tmp_path / "tx.fa.k12.cache.json.gz").exists()
+
+
+# ---------------------------------------------------------------------------
+# Parallel off-target search
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Parallel off-target search
+# ---------------------------------------------------------------------------
+
+
+def _seeded_transcriptome(tmp_path):
+    """FASTA with a repeated motif so candidates yield real hits."""
+    motif = "ACGTTGCAAGGTCATGCC"
+    seqs = {f"NM_{i}": (motif + "GGGCCCAAATTTGGGCCC") * 6 for i in range(6)}
+    path = tmp_path / "seeded.fa"
+    with path.open("w") as fh:
+        for name, seq in seqs.items():
+            fh.write(f">{name}\n{seq}\n")
+    return path
+
+
+def test_search_batch_parallel_matches_serial(tmp_path):
+    import multiprocessing
+
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("fork start method unavailable")
+
+    from aso_designer.off_target import OffTargetSearchEngine, TranscriptomeReference
+
+    fasta = _seeded_transcriptome(tmp_path)
+    rng = random.Random(7)
+    candidates = ["".join(rng.choice("ACGT") for _ in range(20)) for _ in range(24)]
+
+    def build():
+        ref = TranscriptomeReference()
+        ref.load_from_fasta(fasta, cache=False)
+        ref.ensure_index()
+        return OffTargetSearchEngine(ref, max_mismatches=3)
+
+    serial_engine = build()
+    serial = serial_engine.search_batch(candidates)
+
+    parallel_engine = build()
+    parallel = parallel_engine.search_batch(candidates, workers=4)
+
+    assert set(parallel) == set(range(len(candidates)))
+    for i in range(len(candidates)):
+        assert [(h.transcript_id, h.position, h.mismatches) for h in parallel[i]] == [
+            (h.transcript_id, h.position, h.mismatches) for h in serial[i]
+        ]
+
+
+def test_search_batch_serial_fallback_on_small_input(tmp_path):
+    """Small inputs below the parallel threshold stay serial."""
+    from aso_designer.off_target import OffTargetSearchEngine, TranscriptomeReference
+
+    fasta = _seeded_transcriptome(tmp_path)
+    ref = TranscriptomeReference()
+    ref.load_from_fasta(fasta, cache=False)
+    ref.ensure_index()
+    engine = OffTargetSearchEngine(ref, max_mismatches=3)
+    seqs = ["ACGTACGTACGTACGTACGT", "TTGCAAGGTCATGCCTAAAG"]
+    results = engine.search_batch(seqs, workers=4)  # len < 4 threshold
+    assert set(results) == {0, 1}

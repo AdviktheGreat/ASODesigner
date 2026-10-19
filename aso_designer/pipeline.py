@@ -623,15 +623,19 @@ class ASOPipeline:
             seed_end=ot_cfg.seed_end,
         )
 
-        scored = 0
-        for candidate in self._candidates:
-            if not candidate.passes_filters:
-                continue
-            hits = engine.search(
-                candidate.sequence,
-                on_target_transcript=self.result.transcript_id,
-                on_target_position=candidate.start,
+        passing = [c for c in self._candidates if c.passes_filters]
+        hit_map: dict[int, list] = {}
+        if passing:
+            hit_map = engine.search_batch(
+                [c.sequence for c in passing],
+                on_target_transcripts=[self.result.transcript_id] * len(passing),
+                on_target_positions=[c.start for c in passing],
+                workers=getattr(ot_cfg, "workers", 0),
             )
+
+        scored = 0
+        for idx, candidate in enumerate(passing):
+            hits = hit_map.get(idx, [])
             result, score, classification = score_off_target(
                 candidate.sequence,
                 hits,
