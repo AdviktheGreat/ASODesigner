@@ -80,7 +80,9 @@ class TestLoadConfig:
         config = load_config()
         assert config.candidate.length == 20
         assert config.candidate.chemistry == "gapmer"
-        assert config.scoring.weights.accessibility == 0.25
+        # The gapmer preset scales self_structure (0.8) and renormalizes,
+        # so the effective default accessibility weight is 0.25 / 0.98.
+        assert config.scoring.weights.accessibility == pytest.approx(0.255102, abs=1e-5)
 
     def test_with_chemistry(self):
         config = load_config(chemistry="mixmer")
@@ -269,7 +271,8 @@ def test_weight_profile_from_yaml():
 
     cfg = load_config()
     assert cfg.scoring.profile == "balanced"
-    assert cfg.scoring.weights.accessibility == 0.25
+    # gapmer preset renormalization (see test_default_config)
+    assert cfg.scoring.weights.accessibility == pytest.approx(0.255102, abs=1e-5)
 
 
 def test_profile_invalid_rejected():
@@ -317,3 +320,42 @@ def test_engine_from_config_reads_bonus_directly():
     cfg = load_config(chemistry="gapmer")  # preset sets chemistry_bonus 0.05
     engine = create_engine_from_config(chemistry="gapmer")
     assert engine.chemistry_bonus == cfg.scoring.chemistry_bonus == 0.05
+
+
+# ---------------------------------------------------------------------------
+# self_structure_weight_adjust + rnase_h_eligible preset flags
+# ---------------------------------------------------------------------------
+
+
+def test_preset_scales_self_structure_weight():
+    """gapmer preset (adjust 0.8) rescales the weight vector to sum 1.0."""
+    from aso_designer.config_loader import load_config
+
+    cfg = load_config(chemistry="gapmer")
+    weights = cfg.scoring.weights
+    total = (
+        weights.accessibility
+        + weights.thermodynamics
+        + weights.gc_content
+        + weights.off_target
+        + weights.variant
+        + weights.self_structure
+        + weights.positional
+    )
+    assert abs(total - 1.0) <= 0.001
+    # self_structure share is reduced relative to the balanced 0.10
+    assert weights.self_structure < 0.10
+
+
+def test_morpholino_preset_disables_rnase_h():
+    from aso_designer.config_loader import load_config
+
+    cfg = load_config(chemistry="morpholino")
+    assert cfg.candidate.rnase_h_eligible is False
+
+
+def test_gapmer_preset_keeps_rnase_h_override_none():
+    from aso_designer.config_loader import load_config
+
+    cfg = load_config(chemistry="gapmer")
+    assert cfg.candidate.rnase_h_eligible is None

@@ -190,6 +190,40 @@ def _apply_chemistry_preset(config_data: dict, chemistry: str) -> dict:
         config_data.setdefault("scoring", {})["chemistry_bonus"] = bonus
         logger.debug("Stored chemistry bonus %f for %s", bonus, chemistry)
 
+    # Scale the self-structure weight by the preset factor, then
+    # renormalize the weight vector so it still sums to 1.0. Later
+    # overrides (user weights block or a weight profile) win wholesale.
+    adjust = preset.get("self_structure_weight_adjust")
+    if adjust and adjust != 1.0:
+        scoring = config_data.setdefault("scoring", {})
+        weights = dict(
+            scoring.get("weights")
+            or {
+                "accessibility": 0.25,
+                "thermodynamics": 0.20,
+                "gc_content": 0.10,
+                "off_target": 0.20,
+                "variant": 0.10,
+                "self_structure": 0.10,
+                "positional": 0.05,
+            }
+        )
+        weights["self_structure"] = weights.get("self_structure", 0.10) * adjust
+        total = sum(weights.values())
+        scoring["weights"] = {k: round(v / total, 6) for k, v in weights.items()}
+        logger.debug(
+            "Applied self_structure weight adjust %s for %s (renormalized)",
+            adjust,
+            chemistry,
+        )
+
+    # Surface the preset's RNase H eligibility flag (e.g. morpholino:
+    # false) as a candidate-level override consumed by the pipeline.
+    rnase_h = preset.get("rnase_h_eligible")
+    if rnase_h is not None:
+        config_data.setdefault("candidate", {})["rnase_h_eligible"] = bool(rnase_h)
+        logger.debug("Stored rnase_h_eligible=%s for %s", rnase_h, chemistry)
+
     return config_data
 
 

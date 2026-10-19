@@ -352,7 +352,11 @@ class ASOPipeline:
         runs) and the counts are stored as features.
         """
         from aso_designer.candidate_generator import generate_candidates_batched
-        from aso_designer.chemistry import compute_cleavage_profile
+        from aso_designer.chemistry import (
+            apply_chemistry,
+            compute_cleavage_profile,
+            create_chemistry_design,
+        )
         from aso_designer.motifs import assess_motifs
         from aso_designer.quality import extract_metadata
 
@@ -361,6 +365,15 @@ class ASOPipeline:
 
         metadata = extract_metadata(self._transcript)
         transcript_length = len(self._transcript.sequence)
+
+        cand_cfg = self.aso_config.candidate
+        design = create_chemistry_design(
+            cand_cfg,
+            gapmer_config=self.aso_config.gapmer,
+            mixmer_config=self.aso_config.mixmer,
+            lna_config=self.aso_config.lna,
+        )
+
         self._candidates = []
         for batch in generate_candidates_batched(
             sequence=self._transcript.sequence,
@@ -378,6 +391,10 @@ class ASOPipeline:
                 candidate.features["cleavage_score"] = round(profile.mean_gap_score, 4)
                 candidate.features["cleavage_site"] = profile.expected_site
             self._candidates.extend(batch)
+        apply_chemistry(self._candidates, design)
+        if cand_cfg.rnase_h_eligible is not None:
+            for candidate in self._candidates:
+                candidate.features["rnase_h_eligible"] = cand_cfg.rnase_h_eligible
         self.result.total_candidates = len(self._candidates)
         logger.info("Generated %d candidates", self.result.total_candidates)
 

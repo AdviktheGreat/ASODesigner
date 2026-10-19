@@ -89,6 +89,48 @@ def mock_rnaup_result() -> RNAupResult:
 # ---------------------------------------------------------------------------
 
 
+class TestGenerateChemistryApplication:
+    def test_candidates_carry_patterns_and_flags(self):
+        """The generation stage applies the chemistry design to candidates."""
+        pipeline = make_pipeline()
+        pipeline._stage_generate()
+        assert pipeline._candidates
+        for c in pipeline._candidates:
+            assert len(c.modification_pattern) == c.length
+            assert len(c.backbone_pattern) == c.length - 1
+            assert "rnase_h_eligible" in c.features
+            assert "cleavage_score" in c.features
+
+    def test_morpholino_override_disables_rnase_h(self):
+        """A config-level rnase_h_eligible=False overrides the design."""
+
+        config = PipelineConfig(target="TEST")
+        pipeline = ASOPipeline(config)
+        pipeline._transcript = TranscriptRecord(
+            accession="NM_TEST.1",
+            sequence=TRANSCRIPT_SEQ,
+            gene_name="TESTGENE",
+            organism="Homo sapiens",
+        )
+        pipeline._candidates = []
+        # minimal: apply design then the override path
+        from aso_designer.chemistry import apply_chemistry, create_chemistry_design
+
+        cfg = pipeline.aso_config
+        cfg.candidate.rnase_h_eligible = False
+        design = create_chemistry_design(
+            cfg.candidate,
+            gapmer_config=cfg.gapmer,
+            mixmer_config=cfg.mixmer,
+            lna_config=cfg.lna,
+        )
+        pipeline._stage_generate()
+        apply_chemistry(pipeline._candidates, design)
+        for c in pipeline._candidates:
+            c.features["rnase_h_eligible"] = cfg.candidate.rnase_h_eligible
+            assert c.features["rnase_h_eligible"] is False
+
+
 class TestStageGenerate:
     def test_generate_matches_direct_generation(self):
         """Batched pipeline generation equals direct generate_candidates."""

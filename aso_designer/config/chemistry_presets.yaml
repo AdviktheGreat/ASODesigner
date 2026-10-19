@@ -27,6 +27,8 @@ mixmer:
   tm_adjustment: 2.0
   chemistry_bonus: 0.02
   self_structure_weight_adjust: 1.0
+  end_gc_min: 0.0
+  end_gc_max: 0.67
 
 # ---------------------------------------------------------------------------
 # 2'-O-methyl (2'OMe): Full-length 2'-O-methyl modified RNA
@@ -36,6 +38,8 @@ mixmer:
   tm_adjustment: 5.0
   chemistry_bonus: 0.03
   self_structure_weight_adjust: 1.2
+  end_gc_min: 0.0
+  end_gc_max: 0.67
 
 # ---------------------------------------------------------------------------
 # 2'-O-methoxyethyl (MOE): Full-length MOE modified RNA
@@ -45,6 +49,8 @@ moe:
   tm_adjustment: 6.0
   chemistry_bonus: 0.03
   self_structure_weight_adjust: 1.1
+  end_gc_min: 0.0
+  end_gc_max: 0.67
 
 # ---------------------------------------------------------------------------
 # Morpholino: Phosphorodiamidate morpholino oligomers
@@ -57,6 +63,9 @@ morpholino:
   self_structure_weight_adjust: 0.9
   # Morpholinos cannot recruit RNase H — penalize if RNase H is desired.
   rnase_h_eligible: false
+  # End-stability bounds: morpholino stays permissive.
+  end_gc_min: 0.0
+  end_gc_max: 1.0
 
 # ---------------------------------------------------------------------------
 # LNA (locked nucleic acid): interspersed LNA positions
@@ -71,21 +80,6 @@ lna:
   # LNA raises the affinity of intramolecular structure as well, so
   # self-structure weighs more heavily.
   self_structure_weight_adjust: 1.2
-# End-stability bounds for the remaining chemistries (gapmer's are set
-# inline above): reject full-GC terminal clamps on DNA-containing and
-# 2'-modified chemistries; morpholino stays permissive.
-mixmer:
+  # End-stability bounds: reject full-GC terminal clamps.
   end_gc_min: 0.0
   end_gc_max: 0.67
-2ome:
-  end_gc_min: 0.0
-  end_gc_max: 0.67
-moe:
-  end_gc_min: 0.0
-  end_gc_max: 0.67
-lna:
-  end_gc_min: 0.0
-  end_gc_max: 0.67
-morpholino:
-  end_gc_min: 0.0
-  end_gc_max: 1.0
