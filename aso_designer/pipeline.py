@@ -594,7 +594,9 @@ class ASOPipeline:
 
         reference = TranscriptomeReference()
         try:
-            reference.load_from_fasta(transcriptome_path)
+            reference.load_from_fasta(
+                transcriptome_path, cache=getattr(ot_cfg, "index_cache", True)
+            )
         except Exception as e:
             logger.warning(
                 "Could not load transcriptome %s (%s) — skipping off-target analysis",

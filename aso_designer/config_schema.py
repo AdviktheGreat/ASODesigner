@@ -277,6 +277,13 @@ class OffTargetConfig(BaseModel):
     max_hits: conint(ge=1, le=10000) = Field(
         default=50, description="Max off-target hits before filtering."
     )
+    index_cache: bool = Field(
+        default=True,
+        description=(
+            "Persist the transcriptome k-mer index next to the FASTA "
+            "(keyed by FASTA hash and k) and reuse it on repeat runs."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_seed_range(self) -> "OffTargetConfig":

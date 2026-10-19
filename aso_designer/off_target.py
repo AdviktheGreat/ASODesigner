@@ -13,6 +13,10 @@ a deliberate trade-off for search speed at transcriptome scale.
 
 from __future__ import annotations
 
+import gzip
+import hashlib
+import json
+import zlib
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +68,15 @@ class TranscriptEntry:
             sequence=record.sequence,
             length=len(record.sequence),
         )
+
+
+def _fasta_sha256(path: Path) -> str:
+    """SHA-256 of the FASTA bytes, read in chunks."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class TranscriptomeReference:
@@ -144,27 +157,53 @@ class TranscriptomeReference:
         for record in records:
             self.add_transcript(TranscriptEntry.from_record(record))
 
-    def load_from_fasta(self, file_path: str | Path) -> None:
-        """Load transcripts from a FASTA file.
+    def load_from_fasta(
+        self,
+        file_path: str | Path,
+        cache: bool = True,
+    ) -> None:
+        """Load transcripts from a FASTA file, reusing a persistent index.
 
-        Uses the local_loader to parse the file and adds all valid
-        transcripts to the reference.
+        The first run parses the FASTA, builds the k-mer index, and
+        writes a gzipped JSON cache next to the FASTA
+        (``<fasta>.k<k>.cache.json.gz``). Repeat runs with the same
+        FASTA (matched by SHA-256 content hash and k) skip both parsing
+        and index building. A corrupt or stale cache is silently rebuilt.
 
         Parameters
         ----------
         file_path : str or Path
             Path to the FASTA file.
+        cache : bool
+            Use/write the persistent index cache (default True).
         """
+        fasta_path = Path(file_path)
+        cache_path = fasta_path.parent / f"{fasta_path.name}.k{self.kmer_size}.cache.json.gz"
+        cache_key = None
+        if cache:
+            cache_key = _fasta_sha256(fasta_path)
+            if self._load_index_cache(cache_path, cache_key):
+                logger.info(
+                    "Loaded transcriptome index cache for %s (%d transcripts, %d unique k-mers)",
+                    fasta_path,
+                    len(self._transcripts),
+                    len(self._index),
+                )
+                return
+
         from aso_designer.local_loader import load_fasta
 
-        records = load_fasta(file_path, min_length=50)
+        records = load_fasta(fasta_path, min_length=50)
         self.add_from_records(records)
         logger.info(
             "Loaded %d transcripts from %s (total %d nt)",
             len(records),
-            file_path,
+            fasta_path,
             self._total_length,
         )
+        if cache and cache_key is not None:
+            self.ensure_index()  # build before persisting
+            self._write_index_cache(cache_path, cache_key)
 
     def build_index(self) -> None:
         """Build the k-mer index from all transcript sequences.
@@ -193,6 +232,73 @@ class TranscriptomeReference:
         """Build the index if it hasn't been built yet."""
         if not self._indexed:
             self.build_index()
+
+    def _write_index_cache(self, cache_path: Path, cache_key: str) -> None:
+        """Persist transcripts + k-mer index as gzipped JSON."""
+        payload = {
+            "version": 1,
+            "kmer_size": self.kmer_size,
+            "cache_key": cache_key,
+            "total_length": self._total_length,
+            "transcripts": [[t.transcript_id, t.gene_name, t.sequence] for t in self._transcripts],
+            "index": {kmer: positions for kmer, positions in self._index.items()},
+        }
+        try:
+            with gzip.open(cache_path, "wt", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            logger.info("Wrote transcriptome index cache: %s", cache_path)
+        except OSError as e:
+            logger.warning("Could not write index cache %s: %s", cache_path, e)
+
+    def _load_index_cache(self, cache_path: Path, cache_key: str) -> bool:
+        """Populate the reference from a cache; False on any mismatch.
+
+        Verifies the cache version, k-mer size, FASTA content hash, and
+        transcript lengths before trusting the data.
+        """
+        if not cache_path.exists():
+            return False
+        try:
+            with gzip.open(cache_path, "rt", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError, zlib.error) as e:
+            logger.warning("Ignoring unreadable index cache %s: %s", cache_path, e)
+            return False
+        if (
+            payload.get("version") != 1
+            or payload.get("kmer_size") != self.kmer_size
+            or payload.get("cache_key") != cache_key
+        ):
+            return False
+        transcripts = payload.get("transcripts")
+        index = payload.get("index")
+        if not isinstance(transcripts, list) or not isinstance(index, dict):
+            return False
+        try:
+            entries = [
+                TranscriptEntry(
+                    transcript_id=t[0],
+                    gene_name=t[1],
+                    sequence=t[2],
+                    length=len(t[2]),
+                )
+                for t in transcripts
+            ]
+            if sum(e.length for e in entries) != payload.get("total_length"):
+                return False
+            loaded_index: dict[str, list[tuple[int, int]]] = defaultdict(list)
+            for kmer, positions in index.items():
+                if len(kmer) != self.kmer_size:
+                    return False
+                loaded_index[kmer] = [(int(pos[0]), int(pos[1])) for pos in positions]
+        except (IndexError, TypeError, ValueError) as e:
+            logger.warning("Ignoring malformed index cache %s: %s", cache_path, e)
+            return False
+        self._transcripts = entries
+        self._total_length = int(payload["total_length"])
+        self._index = loaded_index
+        self._indexed = True
+        return True
 
     def get_transcript(self, index: int) -> TranscriptEntry:
         """Get a transcript by its index in the reference."""

@@ -546,3 +546,85 @@ class TestScoreOffTarget:
         for _, score, cls in results.values():
             assert 0.0 <= score <= 1.0
             assert cls in ("specific", "moderate", "non-specific")
+
+
+# ---------------------------------------------------------------------------
+# Persistent transcriptome index cache
+# ---------------------------------------------------------------------------
+
+
+def _write_multi_fasta(tmp_path):
+    seqs = {
+        "NM_A": "ACGT" * 30,
+        "NM_B": "TTGCAAGGTCATGCC" * 12,
+    }
+    path = tmp_path / "tx.fa"
+    with path.open("w") as fh:
+        for name, seq in seqs.items():
+            fh.write(f">{name} gene\n{seq}\n")
+    return path
+
+
+def test_index_cache_round_trip(tmp_path):
+    from aso_designer.off_target import TranscriptomeReference
+
+    fasta = _write_multi_fasta(tmp_path)
+    ref1 = TranscriptomeReference()
+    ref1.load_from_fasta(fasta)
+    ref1.ensure_index()
+    cache = tmp_path / "tx.fa.k12.cache.json.gz"
+    assert cache.exists()
+
+    ref2 = TranscriptomeReference()
+    ref2.load_from_fasta(fasta)
+    assert ref2.num_transcripts == ref1.num_transcripts
+    assert ref2._indexed  # loaded straight from cache, no rebuild needed
+    ref2.ensure_index()
+    assert dict(ref2._index) == dict(ref1._index)
+
+
+def test_index_cache_invalidated_by_content_change(tmp_path):
+    import shutil
+
+    from aso_designer.off_target import TranscriptomeReference
+
+    fasta = _write_multi_fasta(tmp_path)
+    ref1 = TranscriptomeReference()
+    ref1.load_from_fasta(fasta)
+    ref1.ensure_index()
+
+    # Same filename, different content -> different hash -> rebuild.
+    workdir = tmp_path / "copy"
+    workdir.mkdir()
+    copy = workdir / "tx.fa"
+    shutil.copy(fasta, copy)
+    copy.write_text(">NM_C\n" + "ACGTTGCAAGGTCATGCC" * 4 + "\n")
+    ref2 = TranscriptomeReference()
+    ref2.load_from_fasta(copy)
+    assert ref2.num_transcripts == 1  # rebuilt from the new FASTA, not the cache
+
+
+def test_index_cache_corrupt_file_rebuilds(tmp_path):
+    from aso_designer.off_target import TranscriptomeReference
+
+    fasta = _write_multi_fasta(tmp_path)
+    ref1 = TranscriptomeReference()
+    ref1.load_from_fasta(fasta)
+    ref1.ensure_index()
+
+    cache = tmp_path / "tx.fa.k12.cache.json.gz"
+    cache.write_bytes(b"not gzip")
+    ref2 = TranscriptomeReference()
+    ref2.load_from_fasta(fasta)
+    ref2.ensure_index()
+    assert ref2.num_transcripts == 2
+
+
+def test_index_cache_disabled(tmp_path):
+    from aso_designer.off_target import TranscriptomeReference
+
+    fasta = _write_multi_fasta(tmp_path)
+    ref = TranscriptomeReference()
+    ref.load_from_fasta(fasta, cache=False)
+    ref.ensure_index()
+    assert not (tmp_path / "tx.fa.k12.cache.json.gz").exists()
