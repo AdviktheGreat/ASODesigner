@@ -14,6 +14,7 @@ from aso_designer.candidate import ASOCandidate
 from aso_designer.chemistry import (
     ChemistryDesign,
     CleavageProfile,
+    LnaDesign,
     compute_cleavage_profile,
     create_chemistry_design,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "ASOPipeline",
     "ChemistryDesign",
     "CleavageProfile",
+    "LnaDesign",
     "DefectDuplexResult",
     "MotifReport",
     "PipelineConfig",

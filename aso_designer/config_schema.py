@@ -65,10 +65,19 @@ class CandidateConfig(BaseModel):
     @model_validator(mode="after")
     def validate_chemistry(self) -> "CandidateConfig":
         """Validate that chemistry is a supported type."""
-        valid = {"gapmer", "mixmer", "2ome", "moe", "morpholino"}
+        valid = {"gapmer", "mixmer", "2ome", "moe", "morpholino", "lna"}
         if self.chemistry not in valid:
             raise ValueError(f"Invalid chemistry '{self.chemistry}'. Must be one of {valid}.")
         return self
+
+
+class LnaConfig(BaseModel):
+    """LNA-specific parameters."""
+
+    pattern: list[bool] = Field(
+        default_factory=list,
+        description="Per-position LNA flags (True = LNA, False = DNA). Empty = default every-third pattern.",
+    )
 
 
 class GapmerConfig(BaseModel):
@@ -326,6 +335,7 @@ class ASOConfig(BaseModel):
     fetch: FetchConfig = Field(default_factory=FetchConfig)
     candidate: CandidateConfig = Field(default_factory=CandidateConfig)
     gapmer: GapmerConfig = Field(default_factory=GapmerConfig)
+    lna: LnaConfig = Field(default_factory=LnaConfig)
     mixmer: MixmerConfig = Field(default_factory=MixmerConfig)
     accessibility: AccessibilityConfig = Field(default_factory=AccessibilityConfig)
     thermodynamics: ThermodynamicsConfig = Field(default_factory=ThermodynamicsConfig)

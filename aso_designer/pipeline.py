@@ -523,6 +523,7 @@ class ASOPipeline:
                 self_structure_max=t_cfg.self_structure_max,
                 method=t_cfg.method,
                 nn_fraction=t_cfg.self_structure_nn_fraction,
+                modification_pattern=list(candidate.modification_pattern) or None,
             )
             candidate.features.update(
                 {

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from aso_designer.candidate import ASOCandidate
-from aso_designer.config_schema import CandidateConfig, GapmerConfig, MixmerConfig
+from aso_designer.config_schema import CandidateConfig, GapmerConfig, LnaConfig, MixmerConfig
 from aso_designer.utils.exceptions import ConfigurationError
 from aso_designer.utils.logger import get_logger
 
@@ -27,9 +27,10 @@ MOD_DNA = "DNA"
 MOD_2OME = "2OMe"
 MOD_MOE = "MOE"
 MOD_MORPHOLINO = "MORPHOLINO"
+MOD_LNA = "LNA"
 
 # All valid chemistry names
-VALID_CHEMISTRIES = {"gapmer", "mixmer", "2ome", "moe", "morpholino"}
+VALID_CHEMISTRIES = {"gapmer", "mixmer", "2ome", "moe", "morpholino", "lna"}
 
 
 class ChemistryDesign(Protocol):
@@ -167,6 +168,66 @@ class MixmerDesign:
 
 
 @dataclass(frozen=True)
+class LnaDesign:
+    """LNA (locked nucleic acid) chemistry: interspersed LNA positions.
+
+    LNA nucleotides lock the ribose conformation and strongly increase
+    duplex affinity (~+2-8 °C Tm per LNA). LNA ASOs are used either as
+    steric blockers or, with a contiguous DNA stretch, as RNase
+    H-recruiting gapmers with LNA-stabilized wings.
+
+    Parameters
+    ----------
+    pattern : list of bool or None
+        Per-position flags (True = LNA, False = DNA). None generates a
+        default pattern with LNA at every third position.
+    """
+
+    pattern: list[bool] | None = None
+
+    def build_pattern(self, length: int) -> list[str]:
+        """Build the modification pattern for an LNA ASO.
+
+        If a custom pattern is provided, it must match the ASO length.
+        Otherwise a default pattern places an LNA at every third
+        nucleotide (offset 1).
+
+        Parameters
+        ----------
+        length : int
+            Total ASO length.
+
+        Returns
+        -------
+        list[str]
+            Per-nucleotide modification labels.
+        """
+        if self.pattern is not None:
+            if len(self.pattern) != length:
+                raise ConfigurationError(
+                    f"LNA pattern length ({len(self.pattern)}) does not match ASO length ({length})"
+                )
+            return [MOD_LNA if p else MOD_DNA for p in self.pattern]
+
+        return [MOD_LNA if i % 3 == 1 else MOD_DNA for i in range(length)]
+
+    def is_rnase_h_eligible(self) -> bool:
+        """True when the pattern leaves a contiguous DNA run of >= 4 nt."""
+        pattern = self.build_pattern(self._pattern_length())
+        best = 0
+        run = 0
+        for mod in pattern:
+            run = run + 1 if mod == MOD_DNA else 0
+            best = max(best, run)
+        return best >= 4
+
+    def _pattern_length(self) -> int:
+        if self.pattern is not None:
+            return len(self.pattern)
+        return 20  # default-pattern probe length
+
+
+@dataclass(frozen=True)
 class FullChemistryDesign:
     """Full-modification chemistry (2'-OMe, MOE, or morpholino).
 
@@ -215,6 +276,7 @@ def create_chemistry_design(
     config: CandidateConfig,
     gapmer_config: GapmerConfig | None = None,
     mixmer_config: MixmerConfig | None = None,
+    lna_config: LnaConfig | None = None,
 ) -> ChemistryDesign:
     """Create the appropriate chemistry design from configuration.
 
@@ -263,6 +325,11 @@ def create_chemistry_design(
             pattern=mixmer_config.pattern if mixmer_config.pattern else None,
             modification=mixmer_config.modification,
         )
+
+    elif chemistry == "lna":
+        if lna_config is None:
+            lna_config = LnaConfig()
+        return LnaDesign(pattern=lna_config.pattern if lna_config.pattern else None)
 
     elif chemistry in ("2ome", "moe", "morpholino"):
         return FullChemistryDesign(mod_type=chemistry)

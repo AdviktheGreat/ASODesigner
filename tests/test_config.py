@@ -91,8 +91,7 @@ class TestLoadConfig:
     def test_with_user_config(self, tmp_path):
         f = tmp_path / "custom.yaml"
         f.write_text(
-            "candidate:\n  length: 18\n  gc_min: 0.35\n"
-            "gapmer:\n  gap_size: 8\n  wing_length: 5\n"
+            "candidate:\n  length: 18\n  gc_min: 0.35\ngapmer:\n  gap_size: 8\n  wing_length: 5\n"
         )
         config = load_config(str(f))
         assert config.candidate.length == 18
@@ -242,3 +241,11 @@ def test_asoconfig_non_gapmer_ignores_geometry():
 
     cfg = ASOConfig(candidate={"chemistry": "mixmer", "length": 22})
     assert cfg.candidate.length == 22
+
+
+def test_asoconfig_accepts_lna_chemistry():
+    from aso_designer.config_schema import ASOConfig
+
+    cfg = ASOConfig(candidate={"chemistry": "lna"})
+    assert cfg.candidate.chemistry == "lna"
+    assert cfg.lna.pattern == []

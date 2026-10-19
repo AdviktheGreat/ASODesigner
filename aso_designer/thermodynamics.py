@@ -2279,7 +2279,14 @@ _RNA_CHEMISTRIES = {"2ome", "moe"}
 # Chemistry types that form an RNA/DNA hybrid duplex with the RNA target
 # (DNA-containing ASOs: DNA gap gapmers, mixed DNA/modified mixmers, and the
 # DNA-like morpholino backbone). See _HYBRID_NN for the parameter source.
-_HYBRID_CHEMISTRIES = {"gapmer", "mixmer", "morpholino"}
+_HYBRID_CHEMISTRIES = {"gapmer", "mixmer", "morpholino", "lna"}
+
+# Per-position LNA affinity adjustment (heuristic, from the LNA literature:
+# each LNA raises duplex Tm by ~2-8 degC and stabilizes the duplex by
+# roughly -1 to -2 kcal/mol; we use mid-range values per LNA site).
+_LNA_TM_PER_SITE = 3.5
+_LNA_DG_PER_SITE = -1.4
+_LNA_MOD_LABEL = "LNA"
 
 
 def get_chemistry_tm_adjustment(chemistry: str) -> float:
@@ -2312,6 +2319,7 @@ def calculate_tm_with_chemistry(
     oligo_conc: float = 1.0e-6,
     mg_conc: float = 0.0,
     dntp_conc: float = 0.0,
+    modification_pattern: list[str] | None = None,
 ) -> float:
     """Calculate Tm with chemistry-specific NN parameters and adjustment.
 
@@ -2338,6 +2346,9 @@ def calculate_tm_with_chemistry(
         Magnesium concentration in M (0 disables Mg2+ correction).
     dntp_conc : float
         dNTP concentration in M (chelates Mg2+).
+    modification_pattern : list of str or None
+        Per-nucleotide modification labels; with the "lna" chemistry each
+        LNA position raises the Tm by ``_LNA_TM_PER_SITE``.
 
     Returns
     -------
@@ -2356,6 +2367,9 @@ def calculate_tm_with_chemistry(
         dntp_conc=dntp_conc,
     )
     adjustment = get_chemistry_tm_adjustment(chemistry)
+    if chemistry == "lna" and modification_pattern:
+        n_lna = sum(1 for mod in modification_pattern if mod == _LNA_MOD_LABEL)
+        adjustment += _LNA_TM_PER_SITE * n_lna
     adjusted_tm = base_tm + adjustment
     logger.debug(
         "Tm for %s (%s): base=%.2f, adj=%+.2f, final=%.2f",
@@ -2514,6 +2528,7 @@ def calculate_duplex_dg_nn(
     aso_sequence: str,
     chemistry: str = "gapmer",
     temperature: float = DEFAULT_TEMPERATURE_C,
+    modification_pattern: list[str] | None = None,
 ) -> DuplexResult:
     """Compute duplex ΔG using the nearest-neighbor model.
 
@@ -2533,6 +2548,9 @@ def calculate_duplex_dg_nn(
         Chemistry name (determines hybrid vs RNA vs DNA NN parameters).
     temperature : float
         Temperature in °C (default 37 °C).
+    modification_pattern : list of str or None
+        Per-nucleotide modification labels; with the "lna" chemistry each
+        LNA position stabilizes the duplex by ``_LNA_DG_PER_SITE``.
 
     Returns
     -------
@@ -2542,6 +2560,9 @@ def calculate_duplex_dg_nn(
     use_rna = chemistry in _RNA_CHEMISTRIES
     use_hybrid = chemistry in _HYBRID_CHEMISTRIES
     dg = calculate_dg(aso_sequence, temperature=temperature, rna=use_rna, hybrid=use_hybrid)
+    if chemistry == "lna" and modification_pattern:
+        n_lna = sum(1 for mod in modification_pattern if mod == _LNA_MOD_LABEL)
+        dg += _LNA_DG_PER_SITE * n_lna
     return DuplexResult(
         aso_sequence=aso_sequence.upper(),
         target_sequence="",
@@ -2556,6 +2577,7 @@ def calculate_duplex_dg(
     chemistry: str = "gapmer",
     method: str = "nearest_neighbor",
     temperature: float = DEFAULT_TEMPERATURE_C,
+    modification_pattern: list[str] | None = None,
 ) -> DuplexResult:
     """Compute duplex ΔG using the specified method.
 
@@ -2572,6 +2594,9 @@ def calculate_duplex_dg(
         "rnaduplex" (ViennaRNA, handles mismatches).
     temperature : float
         Temperature for NN calculation (default 37 °C).
+    modification_pattern : list of str or None
+        Per-nucleotide modification labels; with the "lna" chemistry each
+        LNA position stabilizes the duplex.
 
     Returns
     -------
@@ -2583,7 +2608,12 @@ def calculate_duplex_dg(
             raise ThermodynamicsError("target_sequence is required for rnaduplex method")
         return calculate_duplex_dg_rnaduplex(aso_sequence, target_sequence)
     elif method == "nearest_neighbor":
-        return calculate_duplex_dg_nn(aso_sequence, chemistry=chemistry, temperature=temperature)
+        return calculate_duplex_dg_nn(
+            aso_sequence,
+            chemistry=chemistry,
+            temperature=temperature,
+            modification_pattern=modification_pattern,
+        )
     else:
         raise ThermodynamicsError(
             f"Unknown duplex method: {method}. Use 'nearest_neighbor' or 'rnaduplex'."
@@ -3502,6 +3532,7 @@ def compute_thermodynamic_summary(
     method: str = "nearest_neighbor",
     temperature: float = DEFAULT_TEMPERATURE_C,
     nn_fraction: float = _DEFAULT_NN_FRACTION,
+    modification_pattern: list[str] | None = None,
 ) -> ThermodynamicSummary:
     """Compute a complete thermodynamic summary for an ASO candidate.
 
@@ -3555,6 +3586,7 @@ def compute_thermodynamic_summary(
         oligo_conc=oligo_conc,
         mg_conc=mg_conc,
         dntp_conc=dntp_conc,
+        modification_pattern=modification_pattern,
     )
     tm_score = score_tm(tm, tm_optimal=tm_optimal, tm_min=tm_min, tm_max=tm_max)
 
@@ -3569,6 +3601,7 @@ def compute_thermodynamic_summary(
             chemistry=chemistry,
             method="nearest_neighbor",
             temperature=temperature,
+            modification_pattern=modification_pattern,
         )
 
     # Self-structure ΔG

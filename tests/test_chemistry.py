@@ -8,6 +8,7 @@ from aso_designer.chemistry import (
     CleavageProfile,
     FullChemistryDesign,
     GapmerDesign,
+    LnaDesign,
     MixmerDesign,
     apply_chemistry,
     chemistry_summary,
@@ -388,3 +389,87 @@ class TestComputeCleavageProfile:
         # the 5'-terminal gap positions lose their junction context
         assert at_5p.likelihoods[0] < interior.likelihoods[2]
         assert at_5p.mean_gap_score < interior.mean_gap_score
+
+
+# ---------------------------------------------------------------------------
+# LNA chemistry
+# ---------------------------------------------------------------------------
+
+
+class TestLnaDesign:
+    def test_default_pattern_every_third(self):
+        design = LnaDesign()
+        pattern = design.build_pattern(12)
+        assert pattern[1] == "LNA"
+        assert pattern[4] == "LNA"
+        assert pattern[0] == "DNA"
+        assert pattern.count("LNA") == 4
+
+    def test_custom_pattern_length_mismatch(self):
+        design = LnaDesign(pattern=[True, False])
+        with pytest.raises(ConfigurationError, match="LNA pattern length"):
+            design.build_pattern(10)
+
+    def test_custom_pattern_labels(self):
+        design = LnaDesign(pattern=[True, True, False, False])
+        assert design.build_pattern(4) == ["LNA", "LNA", "DNA", "DNA"]
+
+    def test_rnase_h_eligibility(self):
+        # Default sprinkled pattern has no >=4 DNA run
+        assert not LnaDesign().is_rnase_h_eligible()
+        # Custom pattern with a contiguous 6-nt DNA gap is eligible
+        design = LnaDesign(pattern=[True, True] + [False] * 6 + [True, True])
+        assert design.is_rnase_h_eligible()
+
+    def test_factory_and_valid_chemistries(self):
+        from aso_designer.chemistry import VALID_CHEMISTRIES
+
+        assert "lna" in VALID_CHEMISTRIES
+        design = create_chemistry_design(CandidateConfig(chemistry="lna"))
+        assert isinstance(design, LnaDesign)
+
+
+class TestLnaThermodynamics:
+    SEQ = "ACGTACGTAC"
+    PATTERN = ["DNA", "LNA", "DNA", "LNA", "DNA", "LNA", "DNA", "LNA", "DNA", "LNA"]
+
+    def test_tm_per_lna_site(self):
+        from aso_designer.thermodynamics import calculate_tm_with_chemistry
+
+        base = calculate_tm_with_chemistry(self.SEQ, chemistry="lna")
+        adjusted = calculate_tm_with_chemistry(
+            self.SEQ, chemistry="lna", modification_pattern=self.PATTERN
+        )
+        assert adjusted == pytest.approx(base + 3.5 * 5)
+
+    def test_dg_per_lna_site(self):
+        from aso_designer.thermodynamics import calculate_duplex_dg
+
+        base = calculate_duplex_dg(self.SEQ, chemistry="lna").dg_duplex
+        adjusted = calculate_duplex_dg(
+            self.SEQ, chemistry="lna", modification_pattern=self.PATTERN
+        ).dg_duplex
+        assert adjusted == pytest.approx(base - 1.4 * 5)
+
+    def test_lna_uses_hybrid_nn_params(self):
+        from aso_designer.thermodynamics import calculate_tm_with_chemistry
+
+        # LNA and gapmer share the RNA/DNA hybrid NN base parameters
+        lna_tm = calculate_tm_with_chemistry(self.SEQ, chemistry="lna")
+        gapmer_tm = calculate_tm_with_chemistry(self.SEQ, chemistry="gapmer")
+        assert lna_tm == pytest.approx(gapmer_tm)
+
+    def test_lna_preset_loads(self):
+        from aso_designer.thermodynamics import get_chemistry_tm_adjustment
+
+        assert get_chemistry_tm_adjustment("lna") == 0.0
+
+    def test_summary_threads_pattern(self):
+        from aso_designer.thermodynamics import compute_thermodynamic_summary
+
+        plain = compute_thermodynamic_summary(self.SEQ, chemistry="lna")
+        adjusted = compute_thermodynamic_summary(
+            self.SEQ, chemistry="lna", modification_pattern=self.PATTERN
+        )
+        assert adjusted.tm == pytest.approx(plain.tm + 3.5 * 5)
+        assert adjusted.dg_duplex == pytest.approx(plain.dg_duplex - 1.4 * 5)

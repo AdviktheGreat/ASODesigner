@@ -54,3 +54,17 @@ morpholino:
   self_structure_weight_adjust: 0.9
   # Morpholinos cannot recruit RNase H — penalize if RNase H is desired.
   rnase_h_eligible: false
+
+# ---------------------------------------------------------------------------
+# LNA (locked nucleic acid): interspersed LNA positions
+# ---------------------------------------------------------------------------
+# Per-position affinity is handled in the thermodynamics layer
+# (~+3.5 degC Tm and ~-1.4 kcal/mol duplex dG per LNA site, heuristic);
+# the preset carries only the flat adjustments.
+lna:
+  description: "Locked nucleic acid positions; strongly increases target affinity and nuclease resistance."
+  tm_adjustment: 0.0
+  chemistry_bonus: 0.03
+  # LNA raises the affinity of intramolecular structure as well, so
+  # self-structure weighs more heavily.
+  self_structure_weight_adjust: 1.2
