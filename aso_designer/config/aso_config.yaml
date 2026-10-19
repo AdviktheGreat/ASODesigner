@@ -38,6 +38,11 @@ candidate:
   # Long homopolymers can cause non-specific binding and synthesis issues.
   homopolymer_max: 4
 
+  # Minimum 3'-anchored self-complementary stretch (nt) that REJECTS an
+  # ASO as an ASO:ASO homodimer risk. 0 records the stretch as a report
+  # flag only; raise to e.g. 4 for therapeutic-grade screening.
+  self_dimer_min_stretch: 0
+
   # Chemistry type: gapmer, mixmer, 2ome, moe, morpholino
   chemistry: gapmer
 

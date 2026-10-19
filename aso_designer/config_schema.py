@@ -42,6 +42,14 @@ class CandidateConfig(BaseModel):
     homopolymer_max: conint(ge=2, le=8) = Field(
         default=4, description="Max consecutive identical bases."
     )
+    self_dimer_min_stretch: conint(ge=0, le=20) = Field(
+        default=0,
+        description=(
+            "Minimum 3'-anchored self-complementary stretch (nt) that REJECTS "
+            "an ASO as a homodimer risk. 0 (default) records the stretch only "
+            "as a report flag; e.g. 4 turns it into a hard filter."
+        ),
+    )
     chemistry: str = Field(
         default="gapmer",
         description="Chemistry type: gapmer, mixmer, 2ome, moe, morpholino.",

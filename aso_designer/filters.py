@@ -13,6 +13,7 @@ discarded) so the user can inspect why they were rejected.
 """
 
 from aso_designer.candidate import ASOCandidate
+from aso_designer.dimer import find_3p_complementarity
 from aso_designer.utils.logger import get_logger
 from aso_designer.utils.sequence import gc_content, has_homopolymer
 
@@ -178,6 +179,48 @@ def filter_ambiguous_bases(
     return passed
 
 
+def filter_self_dimer(
+    candidates: list[ASOCandidate],
+    min_stretch: int = 0,
+) -> int:
+    """Screen candidates for 3'-anchored self-complementarity.
+
+    3' complementarity between two copies of the ASO is the classic
+    homodimer failure mode: it extends the duplex and blocks RNase H
+    recruitment. Every passing candidate gets a
+    ``features["self_dimer_stretch"]`` report flag with the length of
+    the longest 3'-anchored self-complementary stretch (G·T wobble
+    counts). When ``min_stretch`` > 0, candidates whose stretch meets
+    or exceeds it are additionally rejected.
+
+    Parameters
+    ----------
+    candidates : list[ASOCandidate]
+        Candidates to filter (modified in place).
+    min_stretch : int
+        Minimum 3'-complementary stretch length that rejects a
+        candidate (default 0 = report only, no rejection).
+
+    Returns
+    -------
+    int
+        Number of candidates that passed this filter.
+    """
+    passed = 0
+    for c in candidates:
+        if not c.passes_filters:
+            continue
+        hit = find_3p_complementarity(c.sequence, min_stretch=1)
+        stretch = hit[0] if hit else 0
+        c.features["self_dimer_stretch"] = stretch
+        if min_stretch > 0 and stretch >= min_stretch:
+            c.passes_filters = False
+            c.features["filter_reason"] = f"3' self-complementary stretch {stretch} nt"
+        else:
+            passed += 1
+    return passed
+
+
 def run_all_filters(
     candidates: list[ASOCandidate],
     gc_min: float = 0.30,
@@ -187,12 +230,13 @@ def run_all_filters(
     max_end_gc: float = 1.0,
     min_end_gc: float = 0.0,
     max_ambiguous: int = 0,
+    self_dimer_min_stretch: int = 0,
 ) -> dict[str, int]:
     """Apply all pre-filters in sequence and return pass counts.
 
     Filters are applied in order: GC content, homopolymer, end
-    stability, ambiguous bases. Each filter only evaluates candidates
-    that passed all previous filters.
+    stability, ambiguous bases, self-dimer screen. Each filter only
+    evaluates candidates that passed all previous filters.
 
     Parameters
     ----------
@@ -208,29 +252,35 @@ def run_all_filters(
         End GC content bounds.
     max_ambiguous : int
         Max allowed ambiguous bases.
+    self_dimer_min_stretch : int
+        Minimum 3'-anchored self-complementary stretch that rejects a
+        candidate (0 = report flag only).
 
     Returns
     -------
     dict[str, int]
         Pass counts per filter stage: {"gc": N, "homopolymer": N,
-        "end_stability": N, "ambiguous": N, "total_passed": N}.
+        "end_stability": N, "ambiguous": N, "self_dimer": N,
+        "total_passed": N}.
     """
     gc_passed = filter_gc_content(candidates, gc_min, gc_max)
     homo_passed = filter_homopolymer(candidates, homopolymer_max)
     end_passed = filter_end_stability(candidates, end_length, max_end_gc, min_end_gc)
     ambig_passed = filter_ambiguous_bases(candidates, max_ambiguous)
+    dimer_passed = filter_self_dimer(candidates, self_dimer_min_stretch)
 
     total = sum(1 for c in candidates if c.passes_filters)
     total_failed = len(candidates) - total
 
     logger.info(
-        "Pre-filters: %d/%d passed (GC: %d, homopolymer: %d, end: %d, ambiguous: %d), %d rejected",
+        "Pre-filters: %d/%d passed (GC: %d, homopolymer: %d, end: %d, ambiguous: %d, dimer: %d), %d rejected",
         total,
         len(candidates),
         gc_passed,
         homo_passed,
         end_passed,
         ambig_passed,
+        dimer_passed,
         total_failed,
     )
 
@@ -239,6 +289,7 @@ def run_all_filters(
         "homopolymer": homo_passed,
         "end_stability": end_passed,
         "ambiguous": ambig_passed,
+        "self_dimer": dimer_passed,
         "total_passed": total,
         "total_failed": total_failed,
     }

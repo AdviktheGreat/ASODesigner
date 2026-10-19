@@ -140,7 +140,7 @@ def test_ambiguous_allows_within_limit() -> None:
 def test_run_all_filters_mixed() -> None:
     """run_all_filters correctly filters a mixed set of candidates."""
     cands = [
-        _make("ATGCATGCATGCATGCATGC"),  # good
+        _make("ATACACGTCAGCACGAAACT"),  # good (no 3' self-complementarity)
         _make("ATATATATATATATATATAT"),  # low GC
         _make("GCGCGCGCGCGCGCGCGCGC"),  # high GC
         _make("AAAAATGCATGCATGCATGC"),  # homopolymer
@@ -154,8 +154,8 @@ def test_run_all_filters_mixed() -> None:
 def test_run_all_filters_all_pass() -> None:
     """run_all_filters passes all valid candidates."""
     cands = [
-        _make("ATGCATGCATGCATGCATGC"),
-        _make("GCTAGCTAGCTAGCTAGCTA"),
+        _make("ATACACGTCAGCACGAAACT"),
+        _make("GCTAAAGACAATTACATAAC"),
     ]
     result = run_all_filters(cands, gc_min=0.3, gc_max=0.6, homopolymer_max=4, max_ambiguous=0)
     assert result["total_passed"] == 2
