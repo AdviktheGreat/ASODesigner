@@ -759,6 +759,7 @@ class ASOPipeline:
         from aso_designer.scoring import (
             create_score_engine,
             rank_and_filter,
+            rerank_ignoring_neutral,
             score_candidates_batch,
         )
 
@@ -787,6 +788,18 @@ class ASOPipeline:
 
         self._scored = score_candidates_batch(passed, features_list, engine=engine)
         self.result.scored_candidates = len(self._scored)
+
+        if self.aso_config.scoring.ignore_neutral_components:
+            self._scored = rerank_ignoring_neutral(self._scored, engine)
+            logger.info(
+                "Re-scored candidates ignoring neutral components (data completeness: %s)",
+                {
+                    name: sum(1 for c in self._scored if c.data_completeness.get(name))
+                    for name in next(iter(self._scored)).data_completeness
+                }
+                if self._scored
+                else {},
+            )
 
         ranking = rank_and_filter(
             self._scored,

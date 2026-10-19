@@ -1130,3 +1130,97 @@ class TestRankCandidatesPareto:
 
         with _pytest.raises(ValueError, match="Unknown rank_mode"):
             rank_and_filter([], rank_mode="bogus")
+
+
+# ---------------------------------------------------------------------------
+# Data-completeness flags + neutral-aware re-ranking
+# ---------------------------------------------------------------------------
+
+
+def _completeness_candidate(feature_overrides):
+    from aso_designer.candidate import ASOCandidate
+
+    base = {
+        "tm": 52.0,
+        "tm_score": 0.8,
+        "dg_self": -5.0,
+        "off_target_score": 0.9,
+        "variant_penalty": 0.0,
+        "accessibility_score": 0.7,
+    }
+    base.update(feature_overrides)
+    cand = ASOCandidate(
+        sequence="ACGT" * 5,
+        start=10,
+        end=30,
+        length=20,
+        chemistry="gapmer",
+        gc_content=0.5,
+        region="CDS",
+        passes_filters=True,
+    )
+    return cand, base
+
+
+def test_derive_data_completeness():
+    from aso_designer.scoring import derive_data_completeness
+
+    _, feats = _completeness_candidate({})
+    flags = derive_data_completeness(feats)
+    assert flags["accessibility"] and flags["thermodynamics"]
+    assert flags["off_target"] and flags["variant"]
+
+    _, feats = _completeness_candidate({"accessibility_score": -1.0, "off_target_score": -1.0})
+    del feats["variant_penalty"]
+    flags = derive_data_completeness(feats)
+    assert not flags["accessibility"]
+    assert not flags["off_target"]
+    assert not flags["variant"]
+    assert flags["gc_content"] and flags["positional"]
+
+
+def test_score_candidate_records_completeness():
+    from aso_designer.scoring import score_candidate
+
+    cand, feats = _completeness_candidate({})
+    del feats["off_target_score"]
+    score = score_candidate(cand, feats)
+    assert score.data_completeness["off_target"] is False
+    assert score.data_completeness["thermodynamics"] is True
+    assert score.to_dict()["data_completeness"]["off_target"] is False
+
+
+def test_rerank_ignoring_neutral_recomputes_final_score():
+    from aso_designer.scoring import (
+        create_score_engine,
+        rerank_ignoring_neutral,
+        score_candidate,
+    )
+
+    engine = create_score_engine(
+        weights={
+            "accessibility": 0.5,
+            "thermodynamics": 0.5,
+            "gc_content": 0.0,
+            "off_target": 0.0,
+            "variant": 0.0,
+            "self_structure": 0.0,
+            "positional": 0.0,
+        },
+        chemistry_bonus=0.0,
+        register_all=True,
+    )
+    # Candidate A: real accessibility; Candidate B: neutral accessibility.
+    cand_a, feats_a = _completeness_candidate({"accessibility_score": 1.0})
+    cand_b, feats_b = _completeness_candidate({"accessibility_score": -1.0, "tm_score": 0.4})
+    scored = [
+        score_candidate(cand_a, feats_a, engine=engine),
+        score_candidate(cand_b, feats_b, engine=engine),
+    ]
+    # With the neutral 0.5 fallback B still earns partial accessibility
+    # credit; ignoring neutral components drops that weight entirely.
+    # B's thermo sub-score is 0.6*0.4 + 0.4*0.5 (neutral binding) = 0.44.
+    reranked = rerank_ignoring_neutral(scored, engine)
+    assert reranked[0].final_score > reranked[1].final_score
+    assert reranked[1].composite_score.composite_score == pytest.approx(0.44)
+    assert all(c.rank is None for c in reranked)

@@ -12,7 +12,7 @@ transparent weight documentation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol, runtime_checkable
 
 from aso_designer.chemistry import backbone_label
@@ -387,6 +387,7 @@ class CandidateScore:
     features: dict[str, Any] = field(default_factory=dict)
     backbone: str = ""
     tie_group: int | None = None
+    data_completeness: dict[str, bool] = field(default_factory=dict)
 
     @property
     def component_scores(self) -> dict[str, float]:
@@ -410,6 +411,7 @@ class CandidateScore:
             },
             "composite_score": round(self.composite_score.composite_score, 4),
             "chemistry_bonus": self.composite_score.chemistry_bonus,
+            "data_completeness": dict(self.data_completeness),
             "features": dict(self.features),
         }
 
@@ -627,6 +629,68 @@ class GCContentScoreComponent:
 # ---------------------------------------------------------------------------
 
 
+def derive_data_completeness(features: dict) -> dict[str, bool]:
+    """Flag which scoring components had real data vs neutral fallbacks.
+
+    Sentinels used by feature stages: a missing ``accessibility_score`` /
+    ``tm_score`` / ``off_target_score`` is stored as -1.0, missing ``tm``
+    as -999.0. Variant and self-structure data are considered present
+    only when their keys exist in the features dict at all.
+    """
+    return {
+        "accessibility": features.get("accessibility_score", -1.0) >= 0,
+        "thermodynamics": (
+            features.get("tm", -999.0) > -900.0 and features.get("tm_score", -1.0) >= 0
+        ),
+        "off_target": features.get("off_target_score", -1.0) >= 0,
+        "variant": "variant_penalty" in features,
+        "self_structure": "dg_self" in features,
+        "gc_content": True,
+        "positional": True,
+    }
+
+
+def rerank_ignoring_neutral(scored, engine):
+    """Recompute final scores using only components with real data.
+
+    The weights of the computed components are renormalized to sum to
+    1.0, the chemistry bonus is re-applied, and ``final_score`` is
+    recomputed. Ranks are cleared; run :func:`rank_candidates` (or the
+    Pareto variant) afterwards to reassign them.
+    """
+    reranked = []
+    for cs in scored:
+        completeness = cs.data_completeness or {}
+        sub_scores = {r.component_name: r.raw_score for r in cs.composite_score.component_results}
+        used = {
+            name: weight
+            for name, weight in engine.weights.items()
+            if name in sub_scores and completeness.get(name, True)
+        }
+        total_weight = sum(used.values())
+        if total_weight > 0:
+            composite = (
+                sum(weight * sub_scores[name] for name, weight in used.items()) / total_weight
+            )
+        else:
+            composite = cs.composite_score.composite_score
+        final = max(0.0, min(1.0, composite + cs.composite_score.chemistry_bonus))
+        reranked.append(
+            replace(
+                cs,
+                composite_score=replace(
+                    cs.composite_score,
+                    composite_score=composite,
+                    final_score=final,
+                ),
+                final_score=final,
+                rank=None,
+                tie_group=None,
+            )
+        )
+    return reranked
+
+
 def score_candidate(
     candidate,
     features: dict | None = None,
@@ -694,6 +758,7 @@ def score_candidate(
         final_score=composite.final_score,
         features=dict(features),
         backbone=backbone_label(candidate.backbone_pattern),
+        data_completeness=derive_data_completeness(features),
     )
 
 

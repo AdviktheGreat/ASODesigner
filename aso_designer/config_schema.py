@@ -390,6 +390,14 @@ class ScoringConfig(BaseModel):
             "explicit weights; 'balanced' keeps the schema defaults."
         ),
     )
+    ignore_neutral_components: bool = Field(
+        default=False,
+        description=(
+            "Recompute final scores using only components backed by real "
+            "data (weights of neutral components are dropped and the rest "
+            "renormalized) before ranking."
+        ),
+    )
     chemistry_bonus: confloat(ge=0.0, le=0.2) = Field(
         default=0.0,
         description="Flat bonus added to the composite score (set by chemistry presets).",
