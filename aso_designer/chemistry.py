@@ -200,8 +200,14 @@ class MixmerDesign:
         return [LINKAGE_PO] * max(length - 1, 0)
 
     def is_rnase_h_eligible(self) -> bool:
-        """Whether this mixmer can recruit RNase H (False — no contiguous DNA gap)."""
-        return False
+        """Whether this mixmer can recruit RNase H.
+
+        True only when the pattern leaves a contiguous DNA run of at
+        least 4 nt (the RNase H substrate requirement); the default
+        alternating pattern does not.
+        """
+        flags = self.pattern if self.pattern is not None else [i % 2 == 0 for i in range(20)]
+        return has_continuous_dna_gap(flags, min_gap=4)
 
 
 @dataclass(frozen=True)

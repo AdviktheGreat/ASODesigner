@@ -525,3 +525,28 @@ class TestBackbonePattern:
 
         assert GapmerConfig().backbone == "ps"
         assert GapmerConfig(backbone="po").backbone == "po"
+
+
+# ---------------------------------------------------------------------------
+# Mixmer RNase H correctness
+# ---------------------------------------------------------------------------
+
+
+def test_mixmer_eligible_with_dna_gap():
+    """A mixmer pattern with a contiguous >=4 DNA run recruits RNase H."""
+    design = MixmerDesign(pattern=[True, True, False, False, False, False, True, True])
+    assert design.is_rnase_h_eligible()
+
+
+def test_mixmer_default_pattern_not_eligible():
+    assert not MixmerDesign().is_rnase_h_eligible()
+
+
+def test_mixmer_modification_enum_rejected():
+    from pydantic import ValidationError
+
+    from aso_designer.config_schema import MixmerConfig
+
+    with pytest.raises(ValidationError, match="mixmer.modification"):
+        MixmerConfig(modification="morpholino")
+    assert MixmerConfig(modification="moe").modification == "moe"

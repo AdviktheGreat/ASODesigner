@@ -113,7 +113,19 @@ class MixmerConfig(BaseModel):
         default_factory=list,
         description="Modification pattern (True = modified).",
     )
-    modification: str = Field(default="2ome", description="Modification type for marked positions.")
+    modification: str = Field(
+        default="2ome",
+        description="Modification type for marked positions: '2ome' or 'moe'.",
+    )
+
+    @field_validator("modification")
+    @classmethod
+    def validate_modification(cls, v: str) -> str:
+        """Restrict mixmer modifications to the supported enum."""
+        allowed = {"2ome", "moe"}
+        if v not in allowed:
+            raise ValueError(f"mixmer.modification must be one of {sorted(allowed)}, got {v!r}")
+        return v
 
 
 class AccessibilityConfig(BaseModel):
