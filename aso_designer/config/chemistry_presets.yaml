@@ -15,6 +15,9 @@ gapmer:
   chemistry_bonus: 0.05
   # Self-structure is less of an issue with DNA center.
   self_structure_weight_adjust: 0.8
+  # End-stability filter bounds: reject full-GC terminal clamps.
+  end_gc_min: 0.0
+  end_gc_max: 0.67
 
 # ---------------------------------------------------------------------------
 # Mixmer: Interspersed modified and unmodified nucleotides
@@ -68,3 +71,21 @@ lna:
   # LNA raises the affinity of intramolecular structure as well, so
   # self-structure weighs more heavily.
   self_structure_weight_adjust: 1.2
+# End-stability bounds for the remaining chemistries (gapmer's are set
+# inline above): reject full-GC terminal clamps on DNA-containing and
+# 2'-modified chemistries; morpholino stays permissive.
+mixmer:
+  end_gc_min: 0.0
+  end_gc_max: 0.67
+2ome:
+  end_gc_min: 0.0
+  end_gc_max: 0.67
+moe:
+  end_gc_min: 0.0
+  end_gc_max: 0.67
+lna:
+  end_gc_min: 0.0
+  end_gc_max: 0.67
+morpholino:
+  end_gc_min: 0.0
+  end_gc_max: 1.0

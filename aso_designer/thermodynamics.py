@@ -2289,6 +2289,35 @@ _LNA_DG_PER_SITE = -1.4
 _LNA_MOD_LABEL = "LNA"
 
 
+def get_chemistry_end_gc_bounds(chemistry: str | None) -> tuple[float, float]:
+    """Get per-chemistry end-stability GC bounds from the presets.
+
+    Parameters
+    ----------
+    chemistry : str or None
+        Chemistry name. None or an unknown name falls back to the
+        chemistry-agnostic default bounds.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(min_end_gc, max_end_gc)`` for the end-stability filter.
+    """
+    default = (0.0, 0.67)
+    if not chemistry:
+        return default
+    try:
+        presets = _load_chemistry_presets()
+    except (OSError, yaml.YAMLError) as e:
+        logger.warning("Could not load chemistry presets; using default bounds: %s", e)
+        return default
+    preset = presets.get(chemistry, {})
+    return (
+        float(preset.get("end_gc_min", default[0])),
+        float(preset.get("end_gc_max", default[1])),
+    )
+
+
 def get_chemistry_tm_adjustment(chemistry: str) -> float:
     """Get the Tm adjustment for a given chemistry from presets.
 

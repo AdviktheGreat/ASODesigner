@@ -392,6 +392,7 @@ class ASOPipeline:
             gc_max=cand_cfg.gc_max,
             homopolymer_max=cand_cfg.homopolymer_max,
             self_dimer_min_stretch=cand_cfg.self_dimer_min_stretch,
+            chemistry=cand_cfg.chemistry,
         )
         self.result.passed_filters = result["total_passed"]
         logger.info(

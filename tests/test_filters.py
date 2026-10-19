@@ -100,7 +100,7 @@ def test_end_stability_rejects_gc_clamp() -> None:
 def test_end_stability_rejects_low_gc() -> None:
     """Candidate with all-AT 5' end is rejected when min_end_gc > 0."""
     cands = [_make("ATATGCGCGCGCGCGCGCGC")]  # ATA at 5'
-    passed = filter_end_stability(cands, end_length=3, min_end_gc=0.34)
+    passed = filter_end_stability(cands, end_length=3, min_end_gc=0.34, max_end_gc=1.0)
     assert passed == 0
     assert "5' end GC" in cands[0].features["filter_reason"]
 
@@ -159,3 +159,38 @@ def test_run_all_filters_all_pass() -> None:
     ]
     result = run_all_filters(cands, gc_min=0.3, gc_max=0.6, homopolymer_max=4, max_ambiguous=0)
     assert result["total_passed"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Chemistry-aware end-stability defaults
+# ---------------------------------------------------------------------------
+
+
+def test_end_stability_default_rejects_full_gc_clamp() -> None:
+    """With no explicit bounds the filter now rejects full-GC ends."""
+    cands = [_make("GCGCATATATATATATATAT")]
+    passed = filter_end_stability(cands)
+    assert passed == 0
+    assert "5' end GC" in cands[0].features["filter_reason"]
+
+
+def test_end_stability_default_passes_balanced() -> None:
+    cands = [_make("ATGCATGCATGCATGCATGC")]  # ends ATG / TGC (1/3, 2/3 GC)
+    assert filter_end_stability(cands) == 1
+
+
+def test_end_stability_morpholino_preset_permissive() -> None:
+    from aso_designer.filters import filter_end_stability as f
+
+    cands = [_make("GCGCATGCGCGCATATATAT")]
+    assert f(cands, chemistry="morpholino") == 1
+
+
+def test_run_all_filters_threads_chemistry() -> None:
+    """run_all_filters passes the chemistry through to the end filter."""
+    cands = [_make("GCGCATGCGCGCATATATAT")]  # GC-balanced, full-GC 5' clamp
+    result = run_all_filters(cands, chemistry="morpholino")
+    assert result["total_passed"] == 1
+    cands2 = [_make("GCGCATGCGCGCATATATAT")]
+    result2 = run_all_filters(cands2, chemistry="gapmer")
+    assert result2["total_passed"] == 0

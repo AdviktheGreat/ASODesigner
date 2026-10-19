@@ -14,6 +14,7 @@ discarded) so the user can inspect why they were rejected.
 
 from aso_designer.candidate import ASOCandidate
 from aso_designer.dimer import find_3p_complementarity
+from aso_designer.thermodynamics import get_chemistry_end_gc_bounds
 from aso_designer.utils.logger import get_logger
 from aso_designer.utils.sequence import gc_content, has_homopolymer
 
@@ -96,8 +97,9 @@ def filter_homopolymer(
 def filter_end_stability(
     candidates: list[ASOCandidate],
     end_length: int = 3,
-    max_end_gc: float = 1.0,
-    min_end_gc: float = 0.0,
+    max_end_gc: float | None = None,
+    min_end_gc: float | None = None,
+    chemistry: str | None = None,
 ) -> int:
     """Filter candidates by 5' and 3' end GC content.
 
@@ -110,16 +112,30 @@ def filter_end_stability(
         Candidates to filter (modified in place).
     end_length : int
         Number of nucleotides at each end to check (default 3).
-    max_end_gc : float
-        Maximum GC fraction allowed at either end (1.0 = no limit).
-    min_end_gc : float
-        Minimum GC fraction required at either end (0.0 = no limit).
+    max_end_gc : float or None
+        Maximum GC fraction allowed at either end. None resolves to the
+        chemistry preset bounds (falling back to 0.67) — full-GC
+        terminal clamps are rejected by default instead of the filter
+        being a no-op.
+    min_end_gc : float or None
+        Minimum GC fraction required at either end. None resolves to
+        the chemistry preset bounds (falling back to 0.0).
+    chemistry : str or None
+        Chemistry name used to resolve per-chemistry preset bounds
+        (e.g. "gapmer"); ignored when both bounds are given explicitly.
 
     Returns
     -------
     int
         Number of candidates that passed this filter.
     """
+    if max_end_gc is None or min_end_gc is None:
+        preset_min, preset_max = get_chemistry_end_gc_bounds(chemistry)
+        if max_end_gc is None:
+            max_end_gc = preset_max
+        if min_end_gc is None:
+            min_end_gc = preset_min
+
     passed = 0
     for c in candidates:
         if not c.passes_filters:
@@ -227,10 +243,11 @@ def run_all_filters(
     gc_max: float = 0.60,
     homopolymer_max: int = 4,
     end_length: int = 3,
-    max_end_gc: float = 1.0,
-    min_end_gc: float = 0.0,
+    max_end_gc: float | None = None,
+    min_end_gc: float | None = None,
     max_ambiguous: int = 0,
     self_dimer_min_stretch: int = 0,
+    chemistry: str | None = None,
 ) -> dict[str, int]:
     """Apply all pre-filters in sequence and return pass counts.
 
@@ -255,6 +272,9 @@ def run_all_filters(
     self_dimer_min_stretch : int
         Minimum 3'-anchored self-complementary stretch that rejects a
         candidate (0 = report flag only).
+    chemistry : str or None
+        Chemistry name for per-chemistry filter defaults (end-stability
+        bounds from the chemistry presets).
 
     Returns
     -------
@@ -265,7 +285,9 @@ def run_all_filters(
     """
     gc_passed = filter_gc_content(candidates, gc_min, gc_max)
     homo_passed = filter_homopolymer(candidates, homopolymer_max)
-    end_passed = filter_end_stability(candidates, end_length, max_end_gc, min_end_gc)
+    end_passed = filter_end_stability(
+        candidates, end_length, max_end_gc, min_end_gc, chemistry=chemistry
+    )
     ambig_passed = filter_ambiguous_bases(candidates, max_ambiguous)
     dimer_passed = filter_self_dimer(candidates, self_dimer_min_stretch)
 

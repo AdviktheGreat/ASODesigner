@@ -851,7 +851,7 @@ class TestCliHandlersInProcess:
         assert os.path.exists(csv_path)
         with open(csv_path) as f:
             lines = f.read().strip().splitlines()
-        assert lines[0].startswith("rank,sequence,start,end,chemistry")
+        assert lines[0].startswith("rank,sequence,backbone,start,end,chemistry")
         assert len(lines) == 4  # header + 3 ranked candidates
 
     def test_report_csv_export(self, tmp_path, capsys):
