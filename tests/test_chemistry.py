@@ -5,11 +5,14 @@ import pytest
 from aso_designer.candidate import ASOCandidate
 from aso_designer.candidate_generator import generate_candidates
 from aso_designer.chemistry import (
+    CleavageProfile,
     FullChemistryDesign,
     GapmerDesign,
     MixmerDesign,
     apply_chemistry,
     chemistry_summary,
+    cleavage_likelihood,
+    compute_cleavage_profile,
     create_chemistry_design,
     get_dna_gap_region,
     has_continuous_dna_gap,
@@ -284,3 +287,90 @@ def test_create_chemistry_unknown_raises() -> None:
     cfg = CandidateConfig.model_construct(chemistry="full")
     with pytest.raises(ConfigurationError, match="Unknown chemistry"):
         create_chemistry_design(cfg)
+
+
+# ---------------------------------------------------------------------------
+# RNase H positional cleavage-likelihood model
+# ---------------------------------------------------------------------------
+
+
+class TestCleavageLikelihood:
+    def test_short_gaps_are_not_substrates(self):
+        assert cleavage_likelihood(0, 1) == 0.0
+        assert cleavage_likelihood(0, 2) == 0.0
+        # 3-nt gaps are marginal substrates at best
+        assert 0.0 < cleavage_likelihood(1, 3) < 0.15
+
+    def test_optimal_gap_size(self):
+        # 6-9 nt gaps reach the maximum size factor
+        for gap in (6, 7, 8, 9):
+            peak = round(0.65 * (gap - 1))  # model peak position
+            mid = cleavage_likelihood(peak, gap)
+            assert 0.85 <= mid <= 1.0
+
+    def test_position_profile_peaks_center_to_3p(self):
+        gap = 10
+        scores = [cleavage_likelihood(i, gap) for i in range(gap)]
+        assert max(scores) == scores.index(max(scores)) * 0 + max(scores)
+        peak_index = scores.index(max(scores))
+        assert 0.4 <= peak_index / (gap - 1) <= 0.8
+        # terminal gap positions are disfavored
+        assert scores[0] < scores[peak_index]
+        assert scores[-1] < scores[peak_index]
+
+    def test_5p_terminal_gap_penalized(self):
+        # A gap running into the 5' end: first positions nearly zero
+        with_wing = [cleavage_likelihood(i, 8) for i in range(3)]
+        at_end = [cleavage_likelihood(i, 8, gap_at_5p_end=True) for i in range(3)]
+        assert at_end[0] < with_wing[0]
+        assert at_end[1] < with_wing[1]
+        assert at_end[2] == pytest.approx(with_wing[2])
+
+    def test_3p_terminal_gap_penalized(self):
+        with_wing = [cleavage_likelihood(i, 8) for i in range(8)]
+        at_end = [cleavage_likelihood(i, 8, gap_at_3p_end=True) for i in range(8)]
+        assert at_end[-1] < with_wing[-1]
+        assert at_end[-2] < with_wing[-2]
+        assert at_end[0] == pytest.approx(with_wing[0])
+
+    def test_out_of_range(self):
+        assert cleavage_likelihood(-1, 8) == 0.0
+        assert cleavage_likelihood(8, 8) == 0.0
+        assert cleavage_likelihood(0, 0) == 0.0
+
+
+class TestComputeCleavageProfile:
+    def test_gapmer_pattern(self):
+        pattern = ["MOE"] * 4 + ["DNA"] * 8 + ["MOE"] * 4
+        profile = compute_cleavage_profile(pattern)
+        assert isinstance(profile, CleavageProfile)
+        assert profile.gap_length == 8
+        assert len(profile.likelihoods) == 16
+        assert all(x == 0.0 for x in profile.likelihoods[:4])
+        assert all(x == 0.0 for x in profile.likelihoods[12:])
+        assert profile.max_score > 0.8
+        assert profile.expected_site is not None
+        assert 4 <= profile.expected_site < 12
+        assert 0.5 <= profile.mean_gap_score <= 1.0
+
+    def test_full_modification_no_gap(self):
+        profile = compute_cleavage_profile(["2OMe"] * 20)
+        assert profile.gap_length == 0
+        assert profile.max_score == 0.0
+        assert profile.expected_site is None
+        assert profile.mean_gap_score == 0.0
+        assert all(x == 0.0 for x in profile.likelihoods)
+
+    def test_largest_gap_wins(self):
+        pattern = ["DNA", "DNA", "2OMe"] + ["DNA"] * 6 + ["2OMe"]
+        profile = compute_cleavage_profile(pattern)
+        assert profile.gap_length == 6
+        assert profile.expected_site is not None
+        assert 3 <= profile.expected_site < 9
+
+    def test_gap_at_terminus_scores_lower(self):
+        interior = compute_cleavage_profile(["MOE", "MOE"] + ["DNA"] * 6 + ["MOE", "MOE"])
+        at_5p = compute_cleavage_profile(["DNA"] * 6 + ["MOE", "MOE"])
+        # the 5'-terminal gap positions lose their junction context
+        assert at_5p.likelihoods[0] < interior.likelihoods[2]
+        assert at_5p.mean_gap_score < interior.mean_gap_score

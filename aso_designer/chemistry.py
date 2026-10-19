@@ -505,3 +505,182 @@ def chemistry_summary(candidate: ASOCandidate) -> str:
     parts.append(f"RNase H: {'yes' if rnase_h else 'no'}")
 
     return ", ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# RNase H1 positional cleavage-likelihood model
+# ---------------------------------------------------------------------------
+
+# Gap-size factor for RNase H1 cleavage efficiency (heuristic, in [0, 1]).
+# Human RNase H1 requires a stretch of ~4-6 contiguous DNA nucleotides for
+# productive cleavage; gaps of ~6-10 nt are near-optimal, and very long
+# gaps add little while costing affinity/specificity.
+_GAP_SIZE_FACTOR: dict[int, float] = {
+    1: 0.0,
+    2: 0.0,
+    3: 0.1,
+    4: 0.4,
+    5: 0.7,
+    6: 0.95,
+    7: 1.0,
+    8: 1.0,
+    9: 1.0,
+    10: 0.9,
+    11: 0.85,
+    12: 0.8,
+}
+_LONG_GAP_FACTOR = 0.75
+
+# Relative cleavage propensity as a function of position within the DNA
+# gap (fraction of the gap from its 5' end). Cleavage sites cluster in
+# the center-to-3' portion of the gap, and the terminal gap nucleotides
+# are rarely cut because RNase H needs duplex substrate on both sides of
+# the scissile phosphate.
+_EDGE_POSITION_FACTOR = 0.15
+_PEAK_FRACTION = 0.65
+
+
+def _position_factor(fraction: float) -> float:
+    """Within-gap positional cleavage propensity in [0, 1].
+
+    A smooth profile that rises from the 5' gap edge, peaks at
+    ``_PEAK_FRACTION`` of the gap, and falls toward the 3' edge, with
+    reduced likelihood at both terminal gap positions.
+    """
+    if fraction <= 0.0 or fraction >= 1.0:
+        return _EDGE_POSITION_FACTOR
+    distance = abs(fraction - _PEAK_FRACTION)
+    half_width = max(_PEAK_FRACTION, 1.0 - _PEAK_FRACTION)
+    return max(0.2, 1.0 - (distance / half_width) * 0.8)
+
+
+def cleavage_likelihood(
+    position_in_gap: int,
+    gap_length: int,
+    gap_at_5p_end: bool = False,
+    gap_at_3p_end: bool = False,
+) -> float:
+    """Positional RNase H1 cleavage likelihood for one gap nucleotide.
+
+    Combines a gap-size factor (cleavage needs a contiguous DNA stretch;
+    very short gaps are not substrates) with a within-gap positional
+    profile (cleavage sites cluster center-to-3' within the gap, and the
+    terminal gap positions are disfavored) and a junction-context
+    penalty when the gap runs into the end of the ASO (no flanking
+    duplex for RNase H).
+
+    Parameters
+    ----------
+    position_in_gap : int
+        0-based position within the DNA gap (from the gap's 5' end).
+    gap_length : int
+        Total length of the DNA gap.
+    gap_at_5p_end : bool
+        Whether the gap touches the 5' terminus of the ASO.
+    gap_at_3p_end : bool
+        Whether the gap touches the 3' terminus of the ASO.
+
+    Returns
+    -------
+    float
+        Cleavage likelihood in [0.0, 1.0] for the target RNA base
+        opposite this gap position.
+    """
+    if gap_length < 1 or position_in_gap < 0 or position_in_gap >= gap_length:
+        return 0.0
+
+    size_factor = _GAP_SIZE_FACTOR.get(gap_length, _LONG_GAP_FACTOR)
+
+    fraction = position_in_gap / (gap_length - 1) if gap_length > 1 else 0.0
+    position_score = _position_factor(fraction)
+
+    # Without a flanking wing on one side, cleavage near that junction has
+    # no intact heteroduplex substrate beyond the gap.
+    if gap_at_5p_end and position_in_gap <= 1:
+        position_score *= 0.1
+    if gap_at_3p_end and position_in_gap >= gap_length - 2:
+        position_score *= 0.1
+
+    return max(0.0, min(1.0, size_factor * position_score))
+
+
+@dataclass
+class CleavageProfile:
+    """Positional RNase H1 cleavage profile across an ASO.
+
+    Attributes
+    ----------
+    likelihoods : list[float]
+        Per-ASO-position cleavage likelihood (0.0 at non-DNA positions).
+    gap_length : int
+        Length of the largest contiguous DNA gap (0 if none).
+    max_score : float
+        Highest per-position likelihood.
+    expected_site : int | None
+        0-based ASO position with the highest likelihood, if any.
+    """
+
+    likelihoods: list[float]
+    gap_length: int
+    max_score: float
+    expected_site: int | None
+
+    @property
+    def mean_gap_score(self) -> float:
+        """Mean likelihood over gap positions (0.0 without a gap)."""
+        scores = [x for x in self.likelihoods if x > 0.0]
+        return sum(scores) / len(scores) if scores else 0.0
+
+
+def compute_cleavage_profile(modification_pattern: list[str]) -> CleavageProfile:
+    """Compute the positional RNase H cleavage profile for a pattern.
+
+    Finds the largest contiguous DNA gap in the modification pattern and
+    assigns every gap position a cleavage likelihood via
+    ``cleavage_likelihood``; all other positions score 0.0.
+
+    Parameters
+    ----------
+    modification_pattern : list[str]
+        Per-nucleotide modification labels (``MOD_DNA`` = unmodified DNA).
+
+    Returns
+    -------
+    CleavageProfile
+        Per-position likelihoods and gap summary.
+    """
+    n = len(modification_pattern)
+    likelihoods = [0.0] * n
+
+    # Locate all contiguous DNA runs, keep the largest.
+    best_start, best_len = None, 0
+    run_start, run_len = None, 0
+    for i, mod in enumerate(modification_pattern):
+        if mod == MOD_DNA:
+            if run_start is None:
+                run_start = i
+            run_len += 1
+            if run_len > best_len:
+                best_start, best_len = run_start, run_len
+        else:
+            run_start, run_len = None, 0
+    if best_start is None or best_len == 0:
+        return CleavageProfile(
+            likelihoods=likelihoods, gap_length=0, max_score=0.0, expected_site=None
+        )
+
+    gap_at_5p = best_start == 0
+    gap_at_3p = best_start + best_len == n
+    for offset in range(best_len):
+        likelihoods[best_start + offset] = cleavage_likelihood(
+            offset, best_len, gap_at_5p_end=gap_at_5p, gap_at_3p_end=gap_at_3p
+        )
+
+    max_score = max(likelihoods)
+    expected_site = likelihoods.index(max_score) if max_score > 0.0 else None
+    return CleavageProfile(
+        likelihoods=likelihoods,
+        gap_length=best_len,
+        max_score=max_score,
+        expected_site=expected_site,
+    )

@@ -352,6 +352,7 @@ class ASOPipeline:
         runs) and the counts are stored as features.
         """
         from aso_designer.candidate_generator import generate_candidates_batched
+        from aso_designer.chemistry import compute_cleavage_profile
         from aso_designer.motifs import assess_motifs
         from aso_designer.quality import extract_metadata
 
@@ -373,6 +374,9 @@ class ASOPipeline:
                 candidate.features["cpg_fraction"] = round(motifs.cpg_fraction, 4)
                 candidate.features["g_quadruplex_motifs"] = motifs.g_quadruplex_motifs
                 candidate.features["motif_risk"] = motifs.risk_label()
+                profile = compute_cleavage_profile(candidate.modification_pattern)
+                candidate.features["cleavage_score"] = round(profile.mean_gap_score, 4)
+                candidate.features["cleavage_site"] = profile.expected_site
             self._candidates.extend(batch)
         self.result.total_candidates = len(self._candidates)
         logger.info("Generated %d candidates", self.result.total_candidates)

@@ -11,7 +11,12 @@ efficacy or safety for any candidate produced.
 """
 
 from aso_designer.candidate import ASOCandidate
-from aso_designer.chemistry import ChemistryDesign, create_chemistry_design
+from aso_designer.chemistry import (
+    ChemistryDesign,
+    CleavageProfile,
+    compute_cleavage_profile,
+    create_chemistry_design,
+)
 from aso_designer.config_loader import load_config
 from aso_designer.config_schema import ASOConfig
 from aso_designer.motifs import MotifReport, assess_motifs
@@ -32,11 +37,13 @@ __all__ = [
     "ASOCandidate",
     "ASOPipeline",
     "ChemistryDesign",
+    "CleavageProfile",
     "DefectDuplexResult",
     "MotifReport",
     "PipelineConfig",
     "assess_motifs",
     "calculate_defect_duplex",
+    "compute_cleavage_profile",
     "create_chemistry_design",
     "load_config",
     "reset_chemistry_presets_cache",
