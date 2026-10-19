@@ -49,10 +49,6 @@ class ASOCandidate:
         Computed feature values (accessibility, Tm, dG duplex, etc.).
         Populated by downstream modules (accessibility, thermodynamics,
         off-target, variant).
-    scores : dict[str, float]
-        Sub-scores and composite score. Keys include "accessibility",
-        "thermodynamics", "gc_content", "off_target", "variant",
-        "self_structure", "positional", and "composite".
     rank : int | None
         Final rank among all candidates (1 = best). None until scored.
     """
@@ -68,7 +64,6 @@ class ASOCandidate:
     region: str = "unknown"
     passes_filters: bool = True
     features: dict[str, Any] = field(default_factory=dict)
-    scores: dict[str, float] = field(default_factory=dict)
     rank: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -85,7 +80,6 @@ class ASOCandidate:
             "region": self.region,
             "passes_filters": self.passes_filters,
             "features": self.features,
-            "scores": {k: round(v, 4) for k, v in self.scores.items()},
             "rank": self.rank,
         }
 
@@ -104,7 +98,8 @@ class ASOCandidate:
             region=data.get("region", "unknown"),
             passes_filters=data.get("passes_filters", True),
             features=data.get("features", {}),
-            scores=data.get("scores", {}),
+            # Legacy serialized payloads may still carry a "scores" key;
+            # scoring results now live exclusively on CandidateScore.
             rank=data.get("rank"),
         )
 

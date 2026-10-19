@@ -157,3 +157,21 @@ def test_load_batch_missing_dir(tmp_path: Path) -> None:
     """Loading from a non-existent directory raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError, match="Directory not found"):
         load_candidates_batch(tmp_path / "missing")
+
+
+def test_legacy_scores_key_ignored():
+    """Old serialized payloads with a "scores" key still load cleanly."""
+    from aso_designer.candidate import ASOCandidate
+
+    data = {
+        "sequence": "ACGT" * 5,
+        "start": 10,
+        "end": 30,
+        "length": 20,
+        "chemistry": "gapmer",
+        "scores": {"composite": 0.5},
+    }
+    cand = ASOCandidate.from_dict(data)
+    assert not hasattr(cand, "scores")
+    out = cand.to_dict()
+    assert "scores" not in out
