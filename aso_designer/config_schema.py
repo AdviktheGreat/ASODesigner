@@ -383,6 +383,10 @@ class ScoringConfig(BaseModel):
             "explicit weights; 'balanced' keeps the schema defaults."
         ),
     )
+    chemistry_bonus: confloat(ge=0.0, le=0.2) = Field(
+        default=0.0,
+        description="Flat bonus added to the composite score (set by chemistry presets).",
+    )
     rank_mode: str = Field(
         default="weighted",
         description="Ranking mode: 'weighted' (weighted sum) or 'pareto' (non-dominated sort).",

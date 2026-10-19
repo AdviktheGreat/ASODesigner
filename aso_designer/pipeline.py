@@ -764,6 +764,7 @@ class ASOPipeline:
                 "self_structure": w.self_structure,
                 "positional": w.positional,
             },
+            chemistry_bonus=self.aso_config.scoring.chemistry_bonus,
             register_all=True,
         )
 

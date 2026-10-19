@@ -906,11 +906,7 @@ def create_engine_from_config(
         "positional": config.scoring.weights.positional,
     }
 
-    chemistry_bonus = 0.0
-    # Check for chemistry bonus stored by config_loader
-    raw_config = config.model_dump()
-    if "scoring" in raw_config and "chemistry_bonus" in raw_config.get("scoring", {}):
-        chemistry_bonus = raw_config["scoring"]["chemistry_bonus"]
+    chemistry_bonus = config.scoring.chemistry_bonus
 
     engine = create_score_engine(
         weights=weights,

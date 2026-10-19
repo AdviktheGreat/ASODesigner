@@ -290,3 +290,30 @@ def test_explicit_weights_beat_config_profile():
     weights["variant"] = 0.30  # keep the sum at 1.0
     cfg2 = ASOConfig(scoring={"profile": "safety", "weights": weights})
     assert cfg2.scoring.weights.accessibility == 0.20
+
+
+# ---------------------------------------------------------------------------
+# chemistry_bonus schema field
+# ---------------------------------------------------------------------------
+
+
+def test_chemistry_bonus_field_and_bounds():
+    from pydantic import ValidationError
+
+    from aso_designer.config_schema import ASOConfig
+
+    assert ASOConfig().scoring.chemistry_bonus == 0.0
+    assert ASOConfig(scoring={"chemistry_bonus": 0.05}).scoring.chemistry_bonus == 0.05
+    with pytest.raises(ValidationError):
+        ASOConfig(scoring={"chemistry_bonus": -0.01})
+    with pytest.raises(ValidationError):
+        ASOConfig(scoring={"chemistry_bonus": 0.5})
+
+
+def test_engine_from_config_reads_bonus_directly():
+    from aso_designer.config_loader import load_config
+    from aso_designer.scoring import create_engine_from_config
+
+    cfg = load_config(chemistry="gapmer")  # preset sets chemistry_bonus 0.05
+    engine = create_engine_from_config(chemistry="gapmer")
+    assert engine.chemistry_bonus == cfg.scoring.chemistry_bonus == 0.05
