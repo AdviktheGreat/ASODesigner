@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from aso_designer.chemistry import backbone_label
 from aso_designer.utils.exceptions import ScoringError
 from aso_designer.utils.logger import get_logger
 
@@ -384,6 +385,7 @@ class CandidateScore:
     final_score: float
     rank: int | None = None
     features: dict[str, Any] = field(default_factory=dict)
+    backbone: str = ""
 
     @property
     def component_scores(self) -> dict[str, float]:
@@ -397,6 +399,7 @@ class CandidateScore:
             "start": self.start,
             "end": self.end,
             "chemistry": self.chemistry,
+            "backbone": self.backbone,
             "final_score": round(self.final_score, 4),
             "rank": self.rank,
             "component_scores": {
@@ -688,6 +691,7 @@ def score_candidate(
         composite_score=composite,
         final_score=composite.final_score,
         features=dict(features),
+        backbone=backbone_label(candidate.backbone_pattern),
     )
 
 

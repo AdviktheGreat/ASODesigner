@@ -862,6 +862,7 @@ def _generate_score_distribution_chart(
 _CSV_CORE_COLUMNS = (
     "rank",
     "sequence",
+    "backbone",
     "start",
     "end",
     "chemistry",
@@ -966,6 +967,8 @@ def export_candidates_fasta(candidates: list[dict[str, Any]], output_path: str |
         fields.append(f"start={row.get('start', '')}")
         fields.append(f"end={row.get('end', '')}")
         fields.append(f"chemistry={row.get('chemistry', '')}")
+        if row.get("backbone"):
+            fields.append(f"backbone={row['backbone']}")
         if row.get("final_score") is not None:
             fields.append(f"score={row['final_score']:.4f}")
         lines.append(">".join(["", " ".join(fields)]))

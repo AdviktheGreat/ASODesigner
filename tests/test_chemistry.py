@@ -473,3 +473,55 @@ class TestLnaThermodynamics:
         )
         assert adjusted.tm == pytest.approx(plain.tm + 3.5 * 5)
         assert adjusted.dg_duplex == pytest.approx(plain.dg_duplex - 1.4 * 5)
+
+
+# ---------------------------------------------------------------------------
+# PS/PO backbone pattern
+# ---------------------------------------------------------------------------
+
+
+class TestBackbonePattern:
+    def test_gapmer_full_ps_default(self):
+        design = GapmerDesign(gap_size=10, wing_length=5)
+        backbone = design.build_backbone(20)
+        assert backbone == ["PS"] * 19
+
+    def test_gapmer_po_option(self):
+        design = GapmerDesign(gap_size=10, wing_length=5, backbone="po")
+        assert design.build_backbone(20) == ["PO"] * 19
+
+    def test_gapmer_invalid_backbone(self):
+        design = GapmerDesign(gap_size=10, wing_length=5, backbone="xyz")
+        with pytest.raises(ConfigurationError, match="Invalid gapmer backbone"):
+            design.build_backbone(20)
+
+    def test_other_chemistries_po(self):
+        assert MixmerDesign().build_backbone(10) == ["PO"] * 9
+        assert LnaDesign().build_backbone(10) == ["PO"] * 9
+        assert FullChemistryDesign().build_backbone(10) == ["PO"] * 9
+
+    def test_apply_chemistry_sets_backbone(self):
+        c = ASOCandidate(sequence="A" * 20, start=0, end=20, length=20)
+        apply_chemistry([c], GapmerDesign())
+        assert c.backbone_pattern == ["PS"] * 19
+
+    def test_backbone_label(self):
+        from aso_designer.chemistry import backbone_label
+
+        assert backbone_label([]) == "none"
+        assert backbone_label(["PS"] * 5) == "full-PS"
+        assert backbone_label(["PO"] * 5) == "full-PO"
+        assert backbone_label(["PS", "PO", "PS"]) == "mixed"
+
+    def test_candidate_backbone_roundtrip(self):
+        c = ASOCandidate(sequence="A" * 20, start=0, end=20, length=20)
+        c.backbone_pattern = ["PS"] * 19
+        data = c.to_dict()
+        restored = ASOCandidate.from_dict(data)
+        assert restored.backbone_pattern == ["PS"] * 19
+
+    def test_gapmer_backbone_config(self):
+        from aso_designer.config_schema import GapmerConfig
+
+        assert GapmerConfig().backbone == "ps"
+        assert GapmerConfig(backbone="po").backbone == "po"

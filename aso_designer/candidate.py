@@ -33,6 +33,10 @@ class ASOCandidate:
     modification_pattern : list[str]
         Per-nucleotide modification labels (e.g. ["MOE", "MOE", "DNA", ...]).
         "DNA" = unmodified DNA, others = modified nucleotide types.
+    backbone_pattern : list[str]
+        Per-linkage backbone labels, length = len(sequence) - 1
+        ("PS" = phosphorothioate, "PO" = natural phosphodiester).
+        Empty until chemistry is applied.
     gc_content : float
         GC content as a fraction (0.0–1.0).
     region : str
@@ -59,6 +63,7 @@ class ASOCandidate:
     length: int
     chemistry: str = "gapmer"
     modification_pattern: list[str] = field(default_factory=list)
+    backbone_pattern: list[str] = field(default_factory=list)
     gc_content: float = 0.0
     region: str = "unknown"
     passes_filters: bool = True
@@ -75,6 +80,7 @@ class ASOCandidate:
             "length": self.length,
             "chemistry": self.chemistry,
             "modification_pattern": self.modification_pattern,
+            "backbone_pattern": self.backbone_pattern,
             "gc_content": round(self.gc_content, 4),
             "region": self.region,
             "passes_filters": self.passes_filters,
@@ -93,6 +99,7 @@ class ASOCandidate:
             length=data["length"],
             chemistry=data.get("chemistry", "gapmer"),
             modification_pattern=data.get("modification_pattern", []),
+            backbone_pattern=data.get("backbone_pattern", []),
             gc_content=data.get("gc_content", 0.0),
             region=data.get("region", "unknown"),
             passes_filters=data.get("passes_filters", True),

@@ -29,6 +29,10 @@ MOD_MOE = "MOE"
 MOD_MORPHOLINO = "MORPHOLINO"
 MOD_LNA = "LNA"
 
+# Backbone (internucleotide linkage) labels
+LINKAGE_PS = "PS"
+LINKAGE_PO = "PO"
+
 # All valid chemistry names
 VALID_CHEMISTRIES = {"gapmer", "mixmer", "2ome", "moe", "morpholino", "lna"}
 
@@ -38,6 +42,10 @@ class ChemistryDesign(Protocol):
 
     def build_pattern(self, length: int) -> list[str]:
         """Return per-nucleotide modification labels for the given length."""
+        ...
+
+    def build_backbone(self, length: int) -> list[str]:
+        """Return per-linkage backbone labels (PS/PO) for the given length."""
         ...
 
     def is_rnase_h_eligible(self) -> bool:
@@ -66,6 +74,7 @@ class GapmerDesign:
     gap_size: int = 10
     wing_length: int = 5
     wing_chemistry: str = "moe"
+    backbone: str = "ps"
 
     def build_pattern(self, length: int) -> list[str]:
         """Build the modification pattern for a gapmer.
@@ -104,6 +113,30 @@ class GapmerDesign:
             + [wing_mod] * self.wing_length
         )
         return pattern
+
+    def build_backbone(self, length: int) -> list[str]:
+        """Build the per-linkage backbone pattern.
+
+        Gapmers default to a full phosphorothioate (PS) backbone for
+        nuclease resistance; ``backbone="po"`` yields natural
+        phosphodiester linkages.
+
+        Parameters
+        ----------
+        length : int
+            Total ASO length (linkages = length - 1).
+
+        Returns
+        -------
+        list[str]
+            Per-linkage backbone labels.
+        """
+        if self.backbone not in ("ps", "po"):
+            raise ConfigurationError(
+                f"Invalid gapmer backbone '{self.backbone}'. Must be 'ps' or 'po'."
+            )
+        linkage = LINKAGE_PS if self.backbone == "ps" else LINKAGE_PO
+        return [linkage] * max(length - 1, 0)
 
     def is_rnase_h_eligible(self) -> bool:
         """Whether this gapmer chemistry can recruit RNase H (True for gapmers)."""
@@ -161,6 +194,10 @@ class MixmerDesign:
         for i in range(length):
             default_pattern.append(mod_label if i % 2 == 0 else MOD_DNA)
         return default_pattern
+
+    def build_backbone(self, length: int) -> list[str]:
+        """Build the per-linkage backbone pattern (natural PO default)."""
+        return [LINKAGE_PO] * max(length - 1, 0)
 
     def is_rnase_h_eligible(self) -> bool:
         """Whether this mixmer can recruit RNase H (False — no contiguous DNA gap)."""
@@ -221,6 +258,10 @@ class LnaDesign:
             best = max(best, run)
         return best >= 4
 
+    def build_backbone(self, length: int) -> list[str]:
+        """Build the per-linkage backbone pattern (natural PO default)."""
+        return [LINKAGE_PO] * max(length - 1, 0)
+
     def _pattern_length(self) -> int:
         if self.pattern is not None:
             return len(self.pattern)
@@ -260,7 +301,12 @@ class FullChemistryDesign:
             "moe": MOD_MOE,
             "morpholino": MOD_MORPHOLINO,
         }.get(self.mod_type, MOD_2OME)
+
         return [label] * length
+
+    def build_backbone(self, length: int) -> list[str]:
+        """Build the per-linkage backbone pattern (natural PO default)."""
+        return [LINKAGE_PO] * max(length - 1, 0)
 
     def is_rnase_h_eligible(self) -> bool:
         """Whether full-modification chemistry can recruit RNase H (False — steric blocking)."""
@@ -316,6 +362,7 @@ def create_chemistry_design(
             gap_size=gapmer_config.gap_size,
             wing_length=gapmer_config.wing_length,
             wing_chemistry=gapmer_config.wing_chemistry,
+            backbone=gapmer_config.backbone,
         )
 
     elif chemistry == "mixmer":
@@ -357,6 +404,7 @@ def apply_chemistry(
     rnase_h = design.is_rnase_h_eligible()
     for candidate in candidates:
         candidate.modification_pattern = design.build_pattern(candidate.length)
+        candidate.backbone_pattern = design.build_backbone(candidate.length)
         candidate.features["rnase_h_eligible"] = rnase_h
 
     logger.info(
@@ -365,6 +413,22 @@ def apply_chemistry(
         len(candidates),
         rnase_h,
     )
+
+
+def backbone_label(backbone_pattern: list[str]) -> str:
+    """Summarize a backbone pattern for reports and ordering headers.
+
+    Returns "none" for an empty pattern, "full-PS"/"full-PO" for a
+    uniform backbone, and "mixed" otherwise.
+    """
+    if not backbone_pattern:
+        return "none"
+    unique = set(backbone_pattern)
+    if unique == {LINKAGE_PS}:
+        return "full-PS"
+    if unique == {LINKAGE_PO}:
+        return "full-PO"
+    return "mixed"
 
 
 # ---------------------------------------------------------------------------

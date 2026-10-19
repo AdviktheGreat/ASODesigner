@@ -89,6 +89,10 @@ class GapmerConfig(BaseModel):
     wing_length: conint(ge=2, le=10) = Field(
         default=5, description="Modified wing length on each side."
     )
+    backbone: str = Field(
+        default="ps",
+        description="Internucleotide backbone: 'ps' (full phosphorothioate, default) or 'po'.",
+    )
     wing_chemistry: str = Field(default="moe", description="Wing modification: 2ome or moe.")
 
     @model_validator(mode="after")
