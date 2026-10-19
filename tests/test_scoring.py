@@ -25,6 +25,7 @@ from aso_designer.scoring import (
     filter_by_score,
     rank_and_filter,
     rank_candidates,
+    rank_candidates_pareto,
     score_candidate,
     score_candidates_batch,
     score_rank_and_filter,
@@ -1059,3 +1060,73 @@ class TestRankCandidatesTieBreaking:
         ranked = rank_candidates([b, a])
         assert ranked[0].tie_group == 1
         assert ranked[1].tie_group == 2
+
+
+# ---------------------------------------------------------------------------
+# Pareto ranking
+# ---------------------------------------------------------------------------
+
+
+class TestRankCandidatesPareto:
+    def _candidate(self, seq, final, thermo, access, off, variant=0.5, self_struct=0.5):
+        from aso_designer.scoring import CandidateScore, CompositeScore, ScoreResult
+
+        results = [
+            ScoreResult(
+                component_name="thermodynamics", raw_score=thermo, weight=0.2, weighted_score=thermo
+            ),
+            ScoreResult(
+                component_name="accessibility", raw_score=access, weight=0.25, weighted_score=access
+            ),
+            ScoreResult(component_name="off_target", raw_score=off, weight=0.2, weighted_score=off),
+            ScoreResult(
+                component_name="variant", raw_score=variant, weight=0.1, weighted_score=variant
+            ),
+            ScoreResult(
+                component_name="self_structure",
+                raw_score=self_struct,
+                weight=0.1,
+                weighted_score=self_struct,
+            ),
+        ]
+        composite = CompositeScore(
+            component_results=results, composite_score=final, chemistry_bonus=0.0, final_score=final
+        )
+        return CandidateScore(
+            sequence=seq,
+            start=0,
+            end=len(seq),
+            chemistry="gapmer",
+            composite_score=composite,
+            final_score=final,
+        )
+
+    def test_dominated_candidate_ranked_last(self):
+        dominated = self._candidate("AAA", 0.9, 0.2, 0.2, 0.2, 0.2, 0.2)
+        strong = self._candidate("CCC", 0.7, 0.9, 0.9, 0.9, 0.9, 0.9)
+        ranked = rank_candidates_pareto([dominated, strong])
+        assert ranked[0].sequence == "CCC"
+        assert ranked[0].rank == 1
+        assert ranked[1].rank == 2
+
+    def test_tradeoff_candidates_share_front(self):
+        # A beats B on thermo; B beats A on off-target: neither dominates
+        a = self._candidate("AAA", 0.8, 0.9, 0.5, 0.3)
+        b = self._candidate("CCC", 0.7, 0.5, 0.5, 0.9)
+        ranked = rank_candidates_pareto([a, b])
+        assert {c.sequence for c in ranked[:2]} == {"AAA", "CCC"}
+        # both are rank 1 candidates of front 1
+        assert ranked[0].rank == 1
+        assert ranked[1].rank == 2
+
+    def test_equal_scores_share_tie_group(self):
+        a = self._candidate("AAA", 0.8, 0.9, 0.5, 0.3)
+        b = self._candidate("CCC", 0.8, 0.5, 0.5, 0.9)
+        ranked = rank_candidates_pareto([a, b])
+        assert ranked[0].tie_group == ranked[1].tie_group
+
+    def test_unknown_mode_rejected(self):
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="Unknown rank_mode"):
+            rank_and_filter([], rank_mode="bogus")

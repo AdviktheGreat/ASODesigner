@@ -1114,15 +1114,90 @@ class RankingResult:
     candidates: list[CandidateScore]
 
 
+def rank_candidates_pareto(scored: list[CandidateScore]) -> list[CandidateScore]:
+    """Rank scored candidates by Pareto non-dominated sorting.
+
+    Multi-objective alternative to the weighted sum. Each candidate is
+    mapped onto three axes derived from its component scores:
+
+    - efficacy: mean of the thermodynamics and accessibility components
+    - specificity: off-target component (higher = fewer off-targets)
+    - safety: mean of the variant and self_structure components
+
+    Candidates are assigned to non-domination fronts (a candidate is
+    dominated when another is at least as good on every axis and better
+    on at least one). Fronts are ranked front-by-front; within a front
+    candidates are ordered by final_score with the deterministic
+    tie-breakers of :func:`rank_candidates`. Equal final scores within
+    the output share a ``tie_group``.
+
+    Parameters
+    ----------
+    scored : list[CandidateScore]
+        Scored candidates (from score_candidates_batch).
+
+    Returns
+    -------
+    list[CandidateScore]
+        Pareto-ranked candidates (rank 1 = best front).
+    """
+
+    def axes(c: CandidateScore) -> tuple[float, float, float]:
+        comp = c.component_scores
+        efficacy = (comp.get("thermodynamics", 0.0) + comp.get("accessibility", 0.0)) / 2
+        specificity = comp.get("off_target", 0.0)
+        safety = (comp.get("variant", 0.0) + comp.get("self_structure", 0.0)) / 2
+        return (efficacy, specificity, safety)
+
+    n = len(scored)
+    data = [axes(c) for c in scored]
+
+    # Fast non-dominated sort (maximize all axes).
+    fronts: list[list[int]] = []
+    remaining = list(range(n))
+    while remaining:
+        front = []
+        for i in remaining:
+            a = data[i]
+            dominated = any(
+                all(data[j][k] >= a[k] for k in range(3))
+                and any(data[j][k] > a[k] for k in range(3))
+                for j in remaining
+                if j != i
+            )
+            if not dominated:
+                front.append(i)
+        fronts.append(front)
+        remaining = [i for i in remaining if i not in front]
+
+    ordered: list[CandidateScore] = []
+    for front in fronts:
+        ordered.extend(sorted((scored[i] for i in front), key=lambda c: -c.final_score))
+
+    # Ranks + tie groups via the standard path (re-sorts deterministically
+    # within fronts is not needed: assign ranks directly, then group ties).
+    for i, cand in enumerate(ordered):
+        cand.rank = i + 1
+    group = 0
+    previous: float | None = None
+    for cand in ordered:
+        if previous is None or cand.final_score != previous:
+            group += 1
+            previous = cand.final_score
+        cand.tie_group = group
+    return ordered
+
+
 def rank_and_filter(
     scored: list[CandidateScore],
     min_score: float = 0.0,
     top_n: int | None = None,
+    rank_mode: str = "weighted",
 ) -> RankingResult:
     """Rank and filter candidates in one step.
 
-    Convenience function that chains filter_by_score → rank_candidates
-    and wraps the result in a RankingResult.
+    Convenience function that chains filter_by_score → ranking and wraps
+    the result in a RankingResult.
 
     Parameters
     ----------
@@ -1132,6 +1207,9 @@ def rank_and_filter(
         Minimum score to keep (default 0.0).
     top_n : int or None
         Keep only top N after filtering.
+    rank_mode : str
+        "weighted" (weighted-sum ranking, default) or "pareto"
+        (non-dominated sorting over efficacy/specificity/safety).
 
     Returns
     -------
@@ -1140,7 +1218,12 @@ def rank_and_filter(
     """
     total = len(scored)
     filtered = filter_by_score(scored, min_score=min_score, top_n=top_n)
-    ranked = rank_candidates(filtered)
+    if rank_mode == "pareto":
+        ranked = rank_candidates_pareto(filtered)
+    elif rank_mode == "weighted":
+        ranked = rank_candidates(filtered)
+    else:
+        raise ValueError(f"Unknown rank_mode: {rank_mode}. Use 'weighted' or 'pareto'.")
 
     if ranked:
         top = ranked[0].final_score

@@ -333,6 +333,19 @@ class ScoringConfig(BaseModel):
     """Scoring configuration."""
 
     weights: ScoringWeightsConfig = Field(default_factory=ScoringWeightsConfig)
+    rank_mode: str = Field(
+        default="weighted",
+        description="Ranking mode: 'weighted' (weighted sum) or 'pareto' (non-dominated sort).",
+    )
+
+    @field_validator("rank_mode")
+    @classmethod
+    def validate_rank_mode(cls, v: str) -> str:
+        """Restrict the ranking mode."""
+        allowed = {"weighted", "pareto"}
+        if v not in allowed:
+            raise ValueError(f"scoring.rank_mode must be one of {sorted(allowed)}, got {v!r}")
+        return v
 
 
 class ReportingConfig(BaseModel):

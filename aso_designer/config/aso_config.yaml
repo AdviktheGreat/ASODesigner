@@ -197,6 +197,10 @@ variant:
 # final composite score. Adjust based on your prioritization needs.
 # All sub-scores are normalized to 0.0–1.0 before weighting.
 scoring:
+  # Ranking mode: "weighted" (weighted sum) or "pareto" (non-dominated
+  # sorting over efficacy/specificity/safety axes).
+  rank_mode: weighted
+
   weights:
     accessibility: 0.25
     thermodynamics: 0.20

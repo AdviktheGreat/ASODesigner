@@ -774,6 +774,7 @@ class ASOPipeline:
             self._scored,
             min_score=self.config.min_score,
             top_n=self.config.top_n,
+            rank_mode=self.aso_config.scoring.rank_mode,
         )
         self._scored = ranking.candidates
         self.result.ranked_candidates = ranking.ranked_candidates
