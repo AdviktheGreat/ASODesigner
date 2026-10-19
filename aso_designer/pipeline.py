@@ -218,6 +218,7 @@ class ASOPipeline:
         self.result = PipelineResult(target=config.target)
         self._config = None  # ASOConfig (loaded lazily)
         self._transcript = None  # TranscriptRecord
+        self._isoform_records: list = []  # list[TranscriptRecord]
         self._candidates: list = []  # list[ASOCandidate]
         self._scored: list = []  # list[CandidateScore]
         self._thermo_summaries: list = []
@@ -328,6 +329,7 @@ class ASOPipeline:
             records = fm.fetch_by_gene(self.config.target, self.config.organism)
             if records:
                 self._transcript = records[0]
+                self._isoform_records = records
 
         if self._transcript is None:
             raise RuntimeError(f"Could not fetch transcript for {self.config.target}")
@@ -395,8 +397,39 @@ class ASOPipeline:
         if cand_cfg.rnase_h_eligible is not None:
             for candidate in self._candidates:
                 candidate.features["rnase_h_eligible"] = cand_cfg.rnase_h_eligible
+
+        if len(self._isoform_records) >= 2:
+            self._apply_isoform_coverage()
         self.result.total_candidates = len(self._candidates)
         logger.info("Generated %d candidates", self.result.total_candidates)
+
+    def _apply_isoform_coverage(self) -> None:
+        """Compute per-candidate isoform-conservation coverage.
+
+        Builds a TranscriptSet from every isoform fetched for the gene,
+        finds regions shared with all of them (coordinate frame: the
+        design transcript), and stores the fraction of each candidate's
+        binding window covered by those regions. The scoring component
+        turns the feature into a rank influence when the
+        ``isoform_conservation`` weight is positive.
+        """
+        from aso_designer.quality import TranscriptSet, isoform_coverage
+
+        transcript_set = TranscriptSet(
+            gene_name=self._transcript.gene_name or "",
+            organism=self.config.organism,
+        )
+        transcript_set.transcripts = list(self._isoform_records)
+        shared = transcript_set.shared_regions(reference=self._transcript)
+        logger.info(
+            "Isoform coverage: %d shared regions across %d isoforms",
+            len(shared),
+            len(self._isoform_records),
+        )
+        for candidate in self._candidates:
+            candidate.features["isoform_conservation"] = round(
+                isoform_coverage(shared, candidate.start, candidate.end), 4
+            )
 
     def _stage_filter(self) -> None:
         """Apply pre-filters to candidates."""

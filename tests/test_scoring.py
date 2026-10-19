@@ -1224,3 +1224,65 @@ def test_rerank_ignoring_neutral_recomputes_final_score():
     assert reranked[0].final_score > reranked[1].final_score
     assert reranked[1].composite_score.composite_score == pytest.approx(0.44)
     assert all(c.rank is None for c in reranked)
+
+
+# ---------------------------------------------------------------------------
+# Isoform-conservation component
+# ---------------------------------------------------------------------------
+
+
+def test_isoform_component_scores_feature():
+    from aso_designer.scoring import (
+        IsoformConservationScoreComponent,
+        ScoreContext,
+    )
+
+    component = IsoformConservationScoreComponent()
+    ctx = ScoreContext(
+        sequence="ACGT" * 5,
+        chemistry="gapmer",
+        start=0,
+        end=20,
+        length=20,
+        gc_content=0.5,
+        region="CDS",
+        isoform_conservation=0.75,
+    )
+    assert component.score(ctx) == 0.75
+    ctx_none = ScoreContext(
+        sequence="ACGT" * 5,
+        chemistry="gapmer",
+        start=0,
+        end=20,
+        length=20,
+        gc_content=0.5,
+        region="CDS",
+    )
+    assert component.score(ctx_none) == 0.5
+
+
+def test_isoform_component_registered_only_when_weighted():
+    from aso_designer.scoring import create_score_engine
+
+    default = create_score_engine()
+    assert "isoform_conservation" not in default._components
+    weighted = create_score_engine(
+        weights={
+            "accessibility": 0.2,
+            "thermodynamics": 0.2,
+            "gc_content": 0.1,
+            "off_target": 0.2,
+            "variant": 0.1,
+            "self_structure": 0.1,
+            "positional": 0.05,
+            "isoform_conservation": 0.05,
+        }
+    )
+    assert "isoform_conservation" in weighted._components
+
+
+def test_isoform_weight_field_default_zero():
+    from aso_designer.config_schema import ScoringWeightsConfig
+
+    cfg = ScoringWeightsConfig()
+    assert cfg.isoform_conservation == 0.0

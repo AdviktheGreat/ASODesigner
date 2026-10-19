@@ -332,6 +332,7 @@ class ScoringWeightsConfig(BaseModel):
     variant: confloat(ge=0.0, le=1.0) = 0.10
     self_structure: confloat(ge=0.0, le=1.0) = 0.10
     positional: confloat(ge=0.0, le=1.0) = 0.05
+    isoform_conservation: confloat(ge=0.0, le=1.0) = 0.0
 
     @model_validator(mode="after")
     def validate_weights_sum(self) -> "ScoringWeightsConfig":
@@ -344,6 +345,7 @@ class ScoringWeightsConfig(BaseModel):
             + self.variant
             + self.self_structure
             + self.positional
+            + self.isoform_conservation
         )
         if abs(total - 1.0) > 0.001:
             raise ValueError(f"Scoring weights must sum to 1.0, got {total:.4f}.")

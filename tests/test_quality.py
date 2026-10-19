@@ -1,5 +1,6 @@
 """Tests for the quality module: ORF detection, validation, metadata, and batch reports."""
 
+import pytest
 import random
 
 from aso_designer.quality import (
@@ -386,3 +387,48 @@ class TestGenerateQualityReport:
         assert batch.total_count == 0
         assert batch.valid_count == 0
         assert batch.min_length == 0
+
+
+# ---------------------------------------------------------------------------
+# Isoform coverage helper
+# ---------------------------------------------------------------------------
+
+
+def test_isoform_coverage_full_partial_none():
+    from aso_designer.quality import isoform_coverage
+
+    shared = [(0, 100), (150, 200)]
+    assert isoform_coverage(shared, 0, 50) == 1.0
+    assert isoform_coverage(shared, 80, 120) == 0.5
+    assert isoform_coverage(shared, 120, 150) == 0.0
+    assert isoform_coverage(shared, 90, 160) == pytest.approx(20 / 70)
+    assert isoform_coverage(shared, 5, 5) == 0.0
+
+
+def test_shared_regions_reference_frame():
+    """shared_regions can use a non-longest transcript as the frame."""
+    from aso_designer.quality import TranscriptSet
+
+    ts = TranscriptSet(gene_name="G", organism="H")
+    ts.add_transcript(
+        TranscriptRecord(
+            accession="NM_LONG",
+            sequence="ACGTACGTAC" * 8,
+            gene_name="G",
+            organism="H",
+        )
+    )
+    ts.add_transcript(
+        TranscriptRecord(
+            accession="NM_SHORT",
+            sequence="ACGTACGTAC" * 5,
+            gene_name="G",
+            organism="H",
+        )
+    )
+    # Use the SHORT transcript as the design frame: every 10-mer of the
+    # short transcript appears in the long one, so the whole window is shared.
+    short = ts.transcripts[1]
+    regions = ts.shared_regions(min_overlap=10, reference=short)
+    assert regions and regions[0][0] == 0
+    assert regions[-1][1] == short.length

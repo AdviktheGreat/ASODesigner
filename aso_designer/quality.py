@@ -446,7 +446,9 @@ class TranscriptSet:
         best_idx = max(range(len(metas)), key=lambda i: metas[i].cds_length)
         return self.transcripts[best_idx]
 
-    def shared_regions(self, min_overlap: int = 20) -> list[tuple[int, int]]:
+    def shared_regions(
+        self, min_overlap: int = 20, reference: "TranscriptRecord | None" = None
+    ) -> list[tuple[int, int]]:
         """Find regions shared across all isoforms (by sequence alignment).
 
         Uses a simple prefix/suffix matching heuristic to identify
@@ -458,27 +460,31 @@ class TranscriptSet:
         ----------
         min_overlap : int
             Minimum shared region length to report (default 20 nt).
+        reference : TranscriptRecord or None
+            Transcript providing the coordinate frame. Defaults to the
+            longest transcript; pass the design transcript so returned
+            coordinates line up with candidate positions on it.
 
         Returns
         -------
         list[tuple[int, int]]
-            List of (start, end) shared regions in the longest transcript
-            coordinate system.
+            List of (start, end) shared regions in the reference
+            transcript's coordinate system.
         """
         if len(self.transcripts) < 2:
-            longest = self.longest_transcript()
-            if longest:
-                return [(0, longest.length)]
+            base = reference or self.longest_transcript()
+            if base:
+                return [(0, base.length)]
             return []
 
-        longest = self.longest_transcript()
-        if longest is None:
+        base = reference or self.longest_transcript()
+        if base is None:
             return []
 
-        ref_seq = longest.sequence
+        ref_seq = base.sequence
         window = min_overlap
-        longest_idx = next(i for i, t in enumerate(self.transcripts) if t is longest)
-        other_seqs = [t.sequence for i, t in enumerate(self.transcripts) if i != longest_idx]
+        base_idx = next(i for i, t in enumerate(self.transcripts) if t is base)
+        other_seqs = [t.sequence for i, t in enumerate(self.transcripts) if i != base_idx]
 
         # Precompute the set of all min_overlap-mers for each other
         # transcript: per-window membership checks become O(1) hash
@@ -520,6 +526,30 @@ class TranscriptSet:
             "longest_accession": self.longest_transcript().accession if self.transcripts else None,
             "longest_length": self.longest_transcript().length if self.transcripts else 0,
         }
+
+
+def isoform_coverage(shared_regions: list[tuple[int, int]], start: int, end: int) -> float:
+    """Fraction of [start, end) covered by isoform-shared regions.
+
+    Args:
+        shared_regions: (start, end) tuples in the design transcript's
+            coordinate system (see TranscriptSet.shared_regions).
+        start: candidate start (0-based).
+        end: candidate end (exclusive).
+
+    Returns:
+        Coverage fraction in [0.0, 1.0]; 0.0 when the window is empty.
+    """
+    if end <= start:
+        return 0.0
+    length = end - start
+    covered = 0
+    for r_start, r_end in shared_regions:
+        lo = max(r_start, start)
+        hi = min(r_end, end)
+        if hi > lo:
+            covered += hi - lo
+    return min(1.0, covered / length)
 
 
 # ---------------------------------------------------------------------------

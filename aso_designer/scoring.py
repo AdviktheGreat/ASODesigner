@@ -126,6 +126,7 @@ class ScoreContext:
 
     # Positional
     transcript_length: int = 0
+    isoform_conservation: float = -1.0
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +454,8 @@ def create_score_engine(
 
     if register_all:
         _register_default_components(engine)
+        if "isoform_conservation" in weights:
+            engine.register_component(IsoformConservationScoreComponent())
 
     return engine
 
@@ -629,6 +632,33 @@ class GCContentScoreComponent:
 # ---------------------------------------------------------------------------
 
 
+class IsoformConservationScoreComponent:
+    """Scores candidates by conservation across transcript isoforms.
+
+    Uses the ``isoform_conservation`` feature (0.0-1.0) computed by the
+    pipeline from TranscriptSet.shared_regions: the fraction of the
+    binding window covered by sequence shared with every other fetched
+    isoform. High coverage means the ASO hits all isoforms of the gene;
+    low coverage means isoform-restricted targeting.
+
+    If no isoform data was available, returns a neutral 0.5 score.
+    The component only influences ranking when given a positive weight
+    (schema default 0.0).
+    """
+
+    @property
+    def name(self) -> str:
+        """Return 'isoform_conservation'."""
+        return "isoform_conservation"
+
+    def score(self, context: ScoreContext) -> float:
+        """Compute the isoform-conservation sub-score."""
+        if context.isoform_conservation < 0:
+            logger.debug("Isoform data unavailable; using neutral 0.5")
+            return 0.5
+        return context.isoform_conservation
+
+
 def derive_data_completeness(features: dict) -> dict[str, bool]:
     """Flag which scoring components had real data vs neutral fallbacks.
 
@@ -647,6 +677,7 @@ def derive_data_completeness(features: dict) -> dict[str, bool]:
         "self_structure": "dg_self" in features,
         "gc_content": True,
         "positional": True,
+        "isoform_conservation": features.get("isoform_conservation", -1.0) >= 0,
     }
 
 
@@ -745,6 +776,7 @@ def score_candidate(
         variant_risk=features.get("variant_risk", ""),
         self_structure_penalty=features.get("self_structure_penalty", 0.0),
         transcript_length=features.get("transcript_length", 0),
+        isoform_conservation=features.get("isoform_conservation", -1.0),
     )
 
     composite = engine.score(ctx)
