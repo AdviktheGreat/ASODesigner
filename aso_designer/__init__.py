@@ -10,6 +10,11 @@ This is a research/candidate-ranking tool. It does not claim experimental
 efficacy or safety for any candidate produced.
 """
 
+from aso_designer.calibration import (
+    CalibrationResult,
+    calibrate_weights,
+    recommend_weights,
+)
 from aso_designer.candidate import ASOCandidate
 from aso_designer.chemistry import (
     ChemistryDesign,
@@ -38,6 +43,7 @@ __all__ = [
     "ASOCandidate",
     "ASOPipeline",
     "ChemistryDesign",
+    "CalibrationResult",
     "CleavageProfile",
     "LnaDesign",
     "DefectDuplexResult",
@@ -45,7 +51,9 @@ __all__ = [
     "PipelineConfig",
     "assess_motifs",
     "calculate_defect_duplex",
+    "calibrate_weights",
     "compute_cleavage_profile",
+    "recommend_weights",
     "create_chemistry_design",
     "load_config",
     "reset_chemistry_presets_cache",

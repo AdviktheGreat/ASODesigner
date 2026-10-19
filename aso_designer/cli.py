@@ -66,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_design_subparser(subparsers)
     _add_score_subparser(subparsers)
+    _add_calibrate_subparser(subparsers)
     _add_report_subparser(subparsers)
     _add_info_subparser(subparsers)
 
@@ -236,6 +237,40 @@ def _add_score_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
+def _add_calibrate_subparser(subparsers: argparse._SubParsersAction) -> None:
+    """Add the 'calibrate' subcommand."""
+    parser = subparsers.add_parser(
+        "calibrate",
+        help="Recommend scoring weights from measured activity data.",
+        description=(
+            "Fit a ridge regression of measured ASO activity on the scoring "
+            "components and print (or save) the recommended weight vector."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--csv",
+        type=str,
+        required=True,
+        help=(
+            "CSV with component scores and a measured 'activity' column "
+            "(see docs/calibration or the module docstring)."
+        ),
+    )
+    parser.add_argument(
+        "--ridge",
+        type=float,
+        default=1.0,
+        help="Ridge penalty (default: 1.0). Increase if features are collinear.",
+    )
+    parser.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="Optional path to write a scoring weights YAML snippet.",
+    )
+
+
 def _add_report_subparser(subparsers: argparse._SubParsersAction) -> None:
     """Add the 'report' subcommand."""
     parser = subparsers.add_parser(
@@ -346,6 +381,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "score": _handle_score,
         "report": _handle_report,
         "info": _handle_info,
+        "calibrate": _handle_calibrate,
     }
 
     handler = handlers.get(args.command)
@@ -795,6 +831,52 @@ def _handle_report(args: argparse.Namespace) -> int:
         print(f"    {fmt.upper():>6}: {path}")
 
     print_success("Report generation complete.")
+    return 0
+
+
+def _handle_calibrate(args: argparse.Namespace) -> int:
+    """Handle the 'calibrate' subcommand."""
+    from pathlib import Path
+
+    from aso_designer.calibration import recommend_weights
+    from aso_designer.utils.exceptions import ConfigurationError
+
+    try:
+        result = recommend_weights(args.csv, ridge=args.ridge)
+    except ConfigurationError as exc:
+        print_error(str(exc))
+        return 1
+
+    print_banner("ASODesigner - Weight Calibration")
+    print(f"  Samples: {result.n_samples}   R^2: {result.r_squared:.3f}   ridge: {result.ridge}")
+    print()
+    print("  Recommended weights (sum to 1.0):")
+    for key, value in sorted(result.weights.items(), key=lambda kv: -kv[1]):
+        print(f"    {key:<16} {value:.4f}")
+
+    if args.out:
+        out_path = Path(args.out)
+        lines = ["scoring:", "  weights:"]
+        for key in (
+            "accessibility",
+            "thermodynamics",
+            "gc_content",
+            "off_target",
+            "variant",
+            "self_structure",
+            "positional",
+        ):
+            lines.append(f"    {key}: {result.weights[key]}")
+        out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print()
+        print(f"  Weights written to {out_path}")
+
+    if result.r_squared < 0.2:
+        print()
+        print(
+            f"  Warning: low fit quality (R^2 = {result.r_squared:.3f}); "
+            "treat the weights as a weak recommendation."
+        )
     return 0
 
 
