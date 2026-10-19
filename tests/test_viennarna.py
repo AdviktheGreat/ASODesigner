@@ -218,6 +218,41 @@ class TestParseRnaplfoldLunp:
         assert r.positions == [1, 2]
         assert r.unpaired_probs == [0.50, 0.30]
 
+    def test_single_column_rows(self, tmp_path):
+        """New-style lunp rows with only the probability column."""
+        lunp = tmp_path / "test_lunp"
+        lunp.write_text("#unpaired probabilities\n1 0.90\n2 0.10\n")
+        r = _parse_rnaplfold_lunp(lunp)
+        assert r.positions == [1, 2]
+        assert r.unpaired_probs == [0.90, 0.10]
+        assert r.unpaired_probs_by_length == {1: [0.90, 0.10]}
+
+    def test_multi_length_parse(self, tmp_path):
+        """-u 1,2,3,4 rows carry one probability column per length."""
+        lunp = tmp_path / "test_lunp"
+        lunp.write_text(
+            "#unpaired probabilities\n"
+            "1    0.95  0.80  0.70  0.60\n"
+            "2    0.87  0.75  0.65  0.55\n"
+            "3    0.12  0.08  0.05  0.02\n"
+        )
+        r = _parse_rnaplfold_lunp(lunp, (1, 2, 3, 4))
+        assert r.positions == [1, 2, 3]
+        assert r.unpaired_probs == [0.95, 0.87, 0.12]
+        assert r.unpaired_lengths == [1, 2, 3, 4]
+        assert r.unpaired_probs_by_length == {
+            1: [0.95, 0.87, 0.12],
+            2: [0.80, 0.75, 0.08],
+            3: [0.70, 0.65, 0.05],
+            4: [0.60, 0.55, 0.02],
+        }
+
+    def test_multi_length_row_error(self, tmp_path):
+        lunp = tmp_path / "test_lunp"
+        lunp.write_text("1    0.95  0.80  0.70\n")
+        with pytest.raises(ViennaRNAError, match="Could not parse lunp row"):
+            _parse_rnaplfold_lunp(lunp, (1, 2, 3, 4))
+
 
 # ---------------------------------------------------------------------------
 # RNAplfold wrapper (mocked subprocess + temp dir)
@@ -256,6 +291,39 @@ class TestRunRnaplfold:
         mock_run.side_effect = subprocess.SubprocessError("boom")
         with pytest.raises(ViennaRNAError, match="execution failed"):
             run_rnaplfold("ATGCATGC")
+
+    @patch("aso_designer.viennarna._get_tool_path")
+    @patch("aso_designer.viennarna.subprocess.run")
+    def test_run_multi_length(self, mock_run, mock_path, tmp_path):
+        """Multiple lengths are passed as -u 1,2,3,4 and parsed per column."""
+        mock_path.return_value = "/usr/local/bin/RNAplfold"
+        captured_args: list[list[str]] = []
+
+        def side_effect(*args, **kwargs):
+            captured_args.append(args[0])
+            cwd = kwargs.get("cwd", tmp_path)
+            lunp = Path(cwd) / "asodesigner_lunp"
+            lunp.write_text(
+                "#unpaired probabilities\n"
+                "1    0.90  0.80  0.70  0.60\n"
+                "2    0.10  0.08  0.05  0.02\n"
+            )
+
+        mock_run.side_effect = side_effect
+        r = run_rnaplfold("ATGCATGC", unpaired_region=(4, 2, 1, 3))
+        assert "-u" in captured_args[0]
+        assert captured_args[0][captured_args[0].index("-u") + 1] == "1,2,3,4"
+        assert r.unpaired_lengths == [1, 2, 3, 4]
+        assert r.unpaired_probs == [0.90, 0.10]
+        assert r.unpaired_probs_by_length[4] == [0.60, 0.02]
+
+    def test_run_invalid_lengths(self):
+        with pytest.raises(ViennaRNAError, match="Invalid unpaired_region"):
+            run_rnaplfold("ATGCATGC", unpaired_region=[])
+        with pytest.raises(ViennaRNAError, match="Invalid unpaired_region"):
+            run_rnaplfold("ATGCATGC", unpaired_region=(1, 0))
+        with pytest.raises(ViennaRNAError, match="Invalid unpaired_region"):
+            run_rnaplfold("ATGCATGC", unpaired_region=0)
 
 
 # ---------------------------------------------------------------------------

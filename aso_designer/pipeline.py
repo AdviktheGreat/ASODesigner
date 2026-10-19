@@ -435,6 +435,7 @@ class ASOPipeline:
             max_pairing_distance=acc_cfg.max_pairing_distance,
             method=acc_cfg.method,
             unpaired_region=acc_cfg.unpaired_region,
+            unpaired_lengths=list(acc_cfg.unpaired_lengths),
         )
         profile = predictor.predict_accessibility(self._transcript.sequence)
 

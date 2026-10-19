@@ -85,6 +85,9 @@ class AccessibilityProfile:
     region_length : int
         Length of the unpaired region the profile refers to (1 for
         RNAplfold; the RNAup ``-u`` value otherwise).
+    unpaired_probs_by_length : dict[int, list[float]] or None
+        RNAplfold only: per-length unpaired probabilities for every
+        requested unpaired-region length (see ``run_rnaplfold``).
     """
 
     sequence: str
@@ -95,6 +98,7 @@ class AccessibilityProfile:
     region_probs: list[float] | None = None
     opening_dg: list[float] | None = None
     region_length: int = 1
+    unpaired_probs_by_length: dict[int, list[float]] | None = None
 
     @classmethod
     def from_rnaplfold_result(
@@ -106,6 +110,7 @@ class AccessibilityProfile:
             positions=result.positions,
             unpaired_probs=result.unpaired_probs,
             window_size=window_size,
+            unpaired_probs_by_length=dict(result.unpaired_probs_by_length),
         )
 
     @classmethod
@@ -142,19 +147,35 @@ class AccessibilityProfile:
             return None
         return self.opening_dg[position - 1]
 
-    def get_unpaired_prob(self, position: int) -> float:
+    def get_unpaired_prob(self, position: int, length: int | None = None) -> float:
         """Get the unpaired probability at a 1-based position.
 
         Parameters
         ----------
         position : int
             1-based position in the sequence.
+        length : int or None
+            Unpaired-region length to look up. None (default) returns the
+            shortest-length probability (the profile's base column); a
+            specific length returns that length's probability when the
+            profile carries multi-length data, falling back to the base
+            column otherwise.
 
         Returns
         -------
         float
             Unpaired probability (0.0–1.0), or 0.0 if out of range.
         """
+        if length is not None and self.unpaired_probs_by_length:
+            probs = self.unpaired_probs_by_length.get(length)
+            if probs is None:
+                raise KeyError(
+                    f"Unpaired length {length} not in profile "
+                    f"(available: {sorted(self.unpaired_probs_by_length)})"
+                )
+            if position < 1 or position > len(probs):
+                return 0.0
+            return probs[position - 1]
         if position < 1 or position > len(self.unpaired_probs):
             return 0.0
         return self.unpaired_probs[position - 1]
@@ -180,6 +201,10 @@ class TargetStructurePredictor:
     unpaired_region : int
         Length of the unpaired region for RNAup's ``-u`` option
         (default 4); ignored for RNAplfold.
+    unpaired_lengths : list of int or None
+        RNAplfold unpaired-region lengths to request (e.g.
+        ``[1, 2, 3, 4]``); defaults to ``[1]`` (per-nucleotide only).
+        Ignored for RNAup.
     """
 
     def __init__(
@@ -189,6 +214,7 @@ class TargetStructurePredictor:
         max_pairing_distance: int = 100,
         method: str = "rnaplfold",
         unpaired_region: int = 4,
+        unpaired_lengths: list[int] | None = None,
     ):
         if method not in ("rnaplfold", "rnaup"):
             raise ValueError(f"Unknown accessibility method: {method}. Use 'rnaplfold' or 'rnaup'.")
@@ -197,6 +223,7 @@ class TargetStructurePredictor:
         self.max_pairing_distance = max_pairing_distance
         self.method = method
         self.unpaired_region = unpaired_region
+        self.unpaired_lengths = list(unpaired_lengths) if unpaired_lengths else [1]
 
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -255,7 +282,8 @@ class TargetStructurePredictor:
             f"accessibility_{self.method}"
             f"{'_W' + str(self.window_size) if self.method == 'rnaplfold' else ''}"
             f"_L{self.max_pairing_distance}"
-            f"{'_u' + str(self.unpaired_region) if self.method == 'rnaup' else ''}",
+            f"{'_u' + str(self.unpaired_region) if self.method == 'rnaup' else ''}"
+            f"{'_ul' + ','.join(map(str, self.unpaired_lengths)) if self.method == 'rnaplfold' else ''}",
         )
         cached = self._load_cache(cache_key)
         if cached is not None:
@@ -275,11 +303,16 @@ class TargetStructurePredictor:
             result = run_rnaup(rna_seq, unpaired_region=self.unpaired_region)
             profile = AccessibilityProfile.from_rnaup_result(result)
         else:
-            logger.info("Running RNAplfold on sequence of length %d", len(rna_seq))
+            logger.info(
+                "Running RNAplfold on sequence of length %d (lengths=%s)",
+                len(rna_seq),
+                self.unpaired_lengths,
+            )
             result = run_rnaplfold(
                 rna_seq,
                 window_size=self.window_size,
                 max_span=self.max_pairing_distance,
+                unpaired_region=self.unpaired_lengths,
             )
             profile = AccessibilityProfile.from_rnaplfold_result(result, rna_seq, self.window_size)
 

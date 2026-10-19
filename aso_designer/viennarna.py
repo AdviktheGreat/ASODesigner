@@ -10,7 +10,8 @@ guidance, and multi-strategy output parsing.
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from aso_designer.utils.exceptions import ViennaRNAError
@@ -289,24 +290,41 @@ class RNAplfoldResult:
     positions : list[int]
         1-based positions in the sequence.
     unpaired_probs : list[float]
-        Probability of being unpaired at each position (0.0–1.0).
+        Probability of being unpaired at each position (0.0–1.0) for the
+        shortest requested unpaired-region length.
+    unpaired_lengths : list[int]
+        The requested unpaired-region lengths, in output-column order.
+    unpaired_probs_by_length : dict[int, list[float]]
+        Per-length unpaired probabilities: for each requested length L,
+        the probability that a stretch of L nucleotides starting at each
+        position is unpaired.
     """
 
     positions: list[int]
     unpaired_probs: list[float]
+    unpaired_lengths: list[int] = field(default_factory=lambda: [1])
+    unpaired_probs_by_length: dict[int, list[float]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.unpaired_probs_by_length:
+            length = self.unpaired_lengths[0] if self.unpaired_lengths else 1
+            self.unpaired_probs_by_length = {length: list(self.unpaired_probs)}
 
 
 def run_rnaplfold(
     sequence: str,
     window_size: int = 150,
     max_span: int = 100,
-    unpaired_region: int = 1,
+    unpaired_region: int | Sequence[int] = 1,
 ) -> RNAplfoldResult:
     """Run RNAplfold to compute local unpaired probabilities.
 
     RNAplfold computes the probability that each nucleotide is
     unpaired within a sliding window. This is the key tool for
-    ASO target accessibility analysis.
+    ASO target accessibility analysis. Multiple unpaired-region
+    lengths can be requested at once, producing per-length
+    probabilities suitable for weighting multi-nucleotide unpaired
+    stretches.
 
     Parameters
     ----------
@@ -316,14 +334,16 @@ def run_rnaplfold(
         Sliding window size in nucleotides (default 150).
     max_span : int
         Maximum base pair distance (default 100).
-    unpaired_region : int
-        Maximum length of unpaired region to consider (default 1 =
-        per-nucleotide accessibility).
+    unpaired_region : int or sequence of int
+        Unpaired-region length(s) to consider (default 1 =
+        per-nucleotide accessibility). A sequence such as ``(1, 2, 3,
+        4)`` is passed to RNAplfold as ``-u 1,2,3,4`` and yields one
+        probability column per length.
 
     Returns
     -------
     RNAplfoldResult
-        Per-position unpaired probabilities.
+        Per-position unpaired probabilities, per requested length.
 
     Raises
     ------
@@ -331,6 +351,12 @@ def run_rnaplfold(
         If RNAplfold fails or output cannot be parsed.
     """
     import tempfile
+
+    lengths = (
+        [unpaired_region] if isinstance(unpaired_region, int) else sorted(set(unpaired_region))
+    )
+    if not lengths or any(x < 1 for x in lengths):
+        raise ViennaRNAError(f"Invalid unpaired_region lengths: {lengths} (must be >= 1)")
 
     rna_seq = dna_to_rna(sequence)
     tool_path = _get_tool_path("RNAplfold")
@@ -343,7 +369,7 @@ def run_rnaplfold(
             "-L",
             str(max_span),
             "-u",
-            str(unpaired_region),
+            ",".join(str(x) for x in lengths),
             "--id",
             "asodesigner",
             "-o",
@@ -370,21 +396,35 @@ def run_rnaplfold(
         if not lunp_files:
             raise ViennaRNAError("RNAplfold did not produce an unpaired probability file")
 
-        return _parse_rnaplfold_lunp(lunp_files[0])
+        return _parse_rnaplfold_lunp(lunp_files[0], tuple(lengths))
 
 
-def _parse_rnaplfold_lunp(filepath: Path) -> RNAplfoldResult:
+def _parse_rnaplfold_lunp(
+    filepath: Path, unpaired_lengths: tuple[int, ...] = (1,)
+) -> RNAplfoldResult:
     """Parse an RNAplfold lunp (unpaired probability) output file.
 
-    The file format is:
-    #unpaired probabilities
-    #i   p_u   u
-    1    0.95  1
-    2    0.87  1
-    ...
+    For a single requested length the file format is::
+
+        #unpaired probabilities
+        #i   p_u   u
+        1    0.95  1
+        2    0.87  1
+
+    With several requested lengths (``-u 1,2,3,4``) the rows carry one
+    probability column per requested length after the position::
+
+        1    0.95  0.80  0.70  0.60
+
+    The parser accepts both layouts: a row with exactly one float per
+    requested length is taken as-is; a row with one extra trailing
+    near-integer column equal to a requested length (the legacy ``u``
+    column) is trimmed before assignment.
     """
+    lengths = list(unpaired_lengths) or [1]
+    k = len(lengths)
     positions: list[int] = []
-    unpaired_probs: list[float] = []
+    columns: list[list[float]] = [[] for _ in range(k)]
 
     with open(filepath) as f:
         for line in f:
@@ -392,20 +432,44 @@ def _parse_rnaplfold_lunp(filepath: Path) -> RNAplfoldResult:
             if not line or line.startswith("#"):
                 continue
             parts = line.split()
-            if len(parts) >= 2:
+            if len(parts) < 2:
+                continue
+            try:
+                pos = int(parts[0])
+            except ValueError:
+                continue
+            floats: list[float] = []
+            for token in parts[1:]:
                 try:
-                    pos = int(parts[0])
-                    prob = float(parts[1])
-                    positions.append(pos)
-                    unpaired_probs.append(prob)
-                except (ValueError, IndexError):
-                    continue
+                    floats.append(float(token))
+                except ValueError:
+                    break
+            if len(floats) == k:
+                probs = floats
+            elif len(floats) == k + 1 and any(
+                abs(floats[-1] - length) < 1e-9 for length in lengths
+            ):
+                probs = floats[:-1]
+            else:
+                raise ViennaRNAError(
+                    f"Could not parse lunp row with {len(floats)} value(s) for "
+                    f"{k} requested length(s): {line[:100]}"
+                )
+            positions.append(pos)
+            for idx, value in enumerate(probs):
+                columns[idx].append(value)
 
     if not positions:
         raise ViennaRNAError(f"No unpaired probabilities found in {filepath}")
 
+    probs_by_length = dict(zip(lengths, columns, strict=True))
     logger.debug("Parsed %d unpaired probabilities from %s", len(positions), filepath)
-    return RNAplfoldResult(positions=positions, unpaired_probs=unpaired_probs)
+    return RNAplfoldResult(
+        positions=positions,
+        unpaired_probs=probs_by_length[min(lengths)],
+        unpaired_lengths=lengths,
+        unpaired_probs_by_length=probs_by_length,
+    )
 
 
 # ---------------------------------------------------------------------------

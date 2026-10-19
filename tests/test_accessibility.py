@@ -119,6 +119,32 @@ class TestAccessibilityProfile:
         assert mock_profile.get_unpaired_prob(0) == 0.0
         assert mock_profile.get_unpaired_prob(100) == 0.0
 
+    def test_from_rnaplfold_result_multi_length(self):
+        result = RNAplfoldResult(
+            positions=[1, 2, 3],
+            unpaired_probs=[0.9, 0.8, 0.7],
+            unpaired_lengths=[1, 2, 3],
+            unpaired_probs_by_length={1: [0.9, 0.8, 0.7], 2: [0.6, 0.5, 0.4], 3: [0.3, 0.2, 0.1]},
+        )
+        profile = AccessibilityProfile.from_rnaplfold_result(result, "AUGCAUGC", 150)
+        assert profile.unpaired_probs_by_length == {
+            1: [0.9, 0.8, 0.7],
+            2: [0.6, 0.5, 0.4],
+            3: [0.3, 0.2, 0.1],
+        }
+        assert profile.get_unpaired_prob(2, length=1) == 0.8
+        assert profile.get_unpaired_prob(2, length=2) == 0.5
+        assert profile.get_unpaired_prob(2, length=3) == 0.2
+
+    def test_get_unpaired_prob_unknown_length_raises(self, mock_profile):
+        mock_profile.unpaired_probs_by_length = {1: list(mock_profile.unpaired_probs)}
+        with pytest.raises(KeyError, match="not in profile"):
+            mock_profile.get_unpaired_prob(1, length=5)
+
+    def test_get_unpaired_prob_length_fallback(self, mock_profile):
+        """Profiles without multi-length data fall back to the base column."""
+        assert mock_profile.get_unpaired_prob(1, length=2) == 0.9
+
 
 # ---------------------------------------------------------------------------
 # Per-position accessibility scoring
@@ -476,6 +502,30 @@ class TestPredictorRnaupMethod:
 
 
 # ---------------------------------------------------------------------------
+# TargetStructurePredictor multi-length RNAplfold
+# ---------------------------------------------------------------------------
+
+
+class TestPredictorMultiLength:
+    @patch("aso_designer.accessibility.run_rnaplfold")
+    def test_lengths_passed_to_rnaplfold(self, mock_rnaplfold, mock_rnaplfold_result):
+        mock_rnaplfold.return_value = mock_rnaplfold_result
+        predictor = TargetStructurePredictor(unpaired_lengths=[1, 2, 3, 4])
+        profile = predictor.predict_accessibility("ATGCATGCATGCATGC")
+        assert mock_rnaplfold.call_args.kwargs["unpaired_region"] == [1, 2, 3, 4]
+        assert profile.unpaired_probs_by_length == {1: list(mock_rnaplfold_result.unpaired_probs)}
+
+    @patch("aso_designer.accessibility.run_rnaplfold")
+    def test_length_sets_use_distinct_cache(self, mock_rnaplfold, mock_rnaplfold_result, tmp_path):
+        mock_rnaplfold.return_value = mock_rnaplfold_result
+        p1 = TargetStructurePredictor(cache_dir=tmp_path, unpaired_lengths=[1])
+        p2 = TargetStructurePredictor(cache_dir=tmp_path, unpaired_lengths=[1, 2, 3, 4])
+        p1.predict_accessibility("ATGCATGC")
+        p2.predict_accessibility("ATGCATGC")
+        assert mock_rnaplfold.call_count == 2
+
+
+# ---------------------------------------------------------------------------
 # Accessibility config plumbing
 # ---------------------------------------------------------------------------
 
@@ -510,6 +560,30 @@ class TestAccessibilityMethodConfig:
         with pytest.raises(ValidationError):
             ASOConfig(accessibility={"unpaired_region": 16})
 
+    def test_unpaired_lengths_default(self):
+        from aso_designer.config_schema import ASOConfig
+
+        assert ASOConfig().accessibility.unpaired_lengths == [1]
+
+    def test_unpaired_lengths_accepted_and_sorted(self):
+        from aso_designer.config_schema import ASOConfig
+
+        assert ASOConfig(
+            accessibility={"unpaired_lengths": [4, 2, 1]}
+        ).accessibility.unpaired_lengths == [1, 2, 4]
+
+    def test_unpaired_lengths_rejected(self):
+        from aso_designer.config_schema import ASOConfig
+
+        with pytest.raises(ValidationError):
+            ASOConfig(accessibility={"unpaired_lengths": []})
+        with pytest.raises(ValidationError):
+            ASOConfig(accessibility={"unpaired_lengths": [2, 2]})
+        with pytest.raises(ValidationError):
+            ASOConfig(accessibility={"unpaired_lengths": [0, 1]})
+        with pytest.raises(ValidationError):
+            ASOConfig(accessibility={"unpaired_lengths": [1, 16]})
+
     def test_yaml_default_loads(self):
         """The shipped YAML parses and carries the new keys."""
         from aso_designer.config_loader import load_config
@@ -517,3 +591,4 @@ class TestAccessibilityMethodConfig:
         cfg = load_config()
         assert cfg.accessibility.method == "rnaplfold"
         assert cfg.accessibility.unpaired_region == 4
+        assert cfg.accessibility.unpaired_lengths == [1]

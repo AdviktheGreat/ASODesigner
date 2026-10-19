@@ -109,6 +109,14 @@ class AccessibilityConfig(BaseModel):
         default=4,
         description="Unpaired-region length for the RNAup method (-u).",
     )
+    unpaired_lengths: list[conint(ge=1, le=15)] = Field(
+        default_factory=lambda: [1],
+        description=(
+            "Unpaired-region lengths for the RNAplfold method (-u 1,2,...). "
+            "The default [1] keeps per-nucleotide accessibility; e.g. "
+            "[1, 2, 3, 4] adds multi-nucleotide stretch probabilities."
+        ),
+    )
     window_size: conint(ge=50, le=500) = Field(
         default=150, description="RNAplfold sliding window size (nt)."
     )
@@ -127,6 +135,16 @@ class AccessibilityConfig(BaseModel):
         if v not in allowed:
             raise ValueError(f"accessibility.method must be one of {sorted(allowed)}, got {v!r}")
         return v
+
+    @field_validator("unpaired_lengths")
+    @classmethod
+    def validate_unpaired_lengths(cls, v: list[int]) -> list[int]:
+        """Require at least one unique, positive unpaired-region length."""
+        if not v:
+            raise ValueError("accessibility.unpaired_lengths must not be empty")
+        if len(set(v)) != len(v):
+            raise ValueError("accessibility.unpaired_lengths must not contain duplicates")
+        return sorted(v)
 
 
 class ThermodynamicsConfig(BaseModel):

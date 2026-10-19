@@ -79,6 +79,11 @@ accessibility:
   # Unpaired-region length for the RNAup method (-u).
   unpaired_region: 4
 
+  # Unpaired-region lengths for the RNAplfold method (-u 1,2,...). The
+  # default [1] keeps per-nucleotide accessibility; e.g. [1, 2, 3, 4]
+  # also exposes multi-nucleotide stretch probabilities.
+  unpaired_lengths: [1]
+
   # RNAplfold sliding window size (nt) for local accessibility.
   # Larger windows capture longer-range interactions but are slower.
   window_size: 150
