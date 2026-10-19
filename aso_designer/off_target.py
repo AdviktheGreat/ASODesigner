@@ -70,6 +70,15 @@ class TranscriptEntry:
         )
 
 
+def extract_spaced_kmer(window: str, pattern: str) -> str:
+    """Extract a spaced k-mer: keep positions where the pattern has '1'.
+
+    Pattern "1101011" over window ACGTTGC yields "ACGTG" (positions
+    0,1,3,5,6). Index and lookup must use the same pattern.
+    """
+    return "".join(base for base, bit in zip(window, pattern, strict=False) if bit == "1")
+
+
 def _fork_available() -> bool:
     """True when the fork start method is usable on this platform."""
     import multiprocessing
@@ -103,8 +112,13 @@ class TranscriptomeReference:
         positives but more memory; smaller k = more candidates to verify.
     """
 
-    def __init__(self, kmer_size: int = 12):
+    def __init__(self, kmer_size: int = 12, seed_pattern: str | None = None):
         self.kmer_size = kmer_size
+        # Spaced-seed pattern ("1" = must-match position). When set, the
+        # index keys are pattern-extracted from windows of len(pattern);
+        # len(pattern) is the effective span and the ones-count the
+        # effective k.
+        self.seed_pattern = seed_pattern
         self._transcripts: list[TranscriptEntry] = []
         self._index: dict[str, list[tuple[int, int]]] = defaultdict(list)
         # _index maps k-mer → list of (transcript_idx, position)
@@ -222,20 +236,31 @@ class TranscriptomeReference:
         the search engine if the index is stale.
         """
         self._index.clear()
-        k = self.kmer_size
-
-        for tidx, transcript in enumerate(self._transcripts):
-            seq = transcript.sequence
-            for i in range(len(seq) - k + 1):
-                kmer = seq[i : i + k]
-                self._index[kmer].append((tidx, i))
+        pattern = self.seed_pattern
+        if pattern:
+            span = len(pattern)
+            for tidx, transcript in enumerate(self._transcripts):
+                seq = transcript.sequence
+                for i in range(len(seq) - span + 1):
+                    key = extract_spaced_kmer(seq[i : i + span], pattern)
+                    self._index[key].append((tidx, i))
+            effective_k = pattern.count("1")
+        else:
+            k = self.kmer_size
+            for tidx, transcript in enumerate(self._transcripts):
+                seq = transcript.sequence
+                for i in range(len(seq) - k + 1):
+                    kmer = seq[i : i + k]
+                    self._index[kmer].append((tidx, i))
+            effective_k = k
 
         self._indexed = True
         logger.info(
-            "Built k-mer index: %d transcripts, %d unique k-mers (k=%d)",
+            "Built k-mer index: %d transcripts, %d unique k-mers (k=%d%s)",
             len(self._transcripts),
             len(self._index),
-            k,
+            effective_k,
+            ", spaced" if pattern else "",
         )
 
     def ensure_index(self) -> None:
@@ -248,10 +273,11 @@ class TranscriptomeReference:
         payload = {
             "version": 1,
             "kmer_size": self.kmer_size,
+            "seed_pattern": self.seed_pattern,
             "cache_key": cache_key,
             "total_length": self._total_length,
             "transcripts": [[t.transcript_id, t.gene_name, t.sequence] for t in self._transcripts],
-            "index": {kmer: positions for kmer, positions in self._index.items()},
+            "index": dict(self._index.items()),
         }
         try:
             with gzip.open(cache_path, "wt", encoding="utf-8") as fh:
@@ -277,6 +303,7 @@ class TranscriptomeReference:
         if (
             payload.get("version") != 1
             or payload.get("kmer_size") != self.kmer_size
+            or payload.get("seed_pattern") != self.seed_pattern
             or payload.get("cache_key") != cache_key
         ):
             return False
@@ -297,8 +324,9 @@ class TranscriptomeReference:
             if sum(e.length for e in entries) != payload.get("total_length"):
                 return False
             loaded_index: dict[str, list[tuple[int, int]]] = defaultdict(list)
+            expected_key_len = self.seed_pattern.count("1") if self.seed_pattern else self.kmer_size
             for kmer, positions in index.items():
-                if len(kmer) != self.kmer_size:
+                if len(kmer) != expected_key_len:
                     return False
                 loaded_index[kmer] = [(int(pos[0]), int(pos[1])) for pos in positions]
         except (IndexError, TypeError, ValueError) as e:
@@ -438,11 +466,15 @@ class OffTargetSearchEngine:
         max_mismatches: int = 3,
         seed_start: int = 2,
         seed_end: int = 8,
+        seed_pattern: str | None = None,
     ):
         self.reference = reference
         self.max_mismatches = max_mismatches
         self.seed_start = seed_start
         self.seed_end = seed_end
+        # Spaced-seed pattern for candidate retrieval (must match the
+        # pattern the reference index was built with).
+        self.seed_pattern = seed_pattern if seed_pattern else reference.seed_pattern
 
     def search(
         self,
@@ -477,7 +509,9 @@ class OffTargetSearchEngine:
         aso_seq = aso_sequence.upper()
         target_site = reverse_complement(aso_seq)
         L = len(target_site)
-        k = self.reference.kmer_size
+        pattern = self.seed_pattern
+        span = len(pattern) if pattern else self.reference.kmer_size
+        k = span  # effective lookup span
 
         if L < k:
             raise OffTargetError(f"ASO length {L} is shorter than k-mer size {k}")
@@ -488,12 +522,14 @@ class OffTargetSearchEngine:
                 "longer ASO."
             )
 
-        # Extract k-mers from the target site and look up in the index
+        # Extract k-mers (contiguous or spaced) from the target site and
+        # look them up in the index.
         candidate_positions: set[tuple[int, int]] = set()
-        for i in range(L - k + 1):
-            kmer = target_site[i : i + k]
-            if kmer in self.reference._index:
-                for tidx, pos in self.reference._index[kmer]:
+        for i in range(L - span + 1):
+            window = target_site[i : i + span]
+            key = extract_spaced_kmer(window, pattern) if pattern else window
+            if key in self.reference._index:
+                for tidx, pos in self.reference._index[key]:
                     # Adjust position to the start of the full-length match
                     start = pos - i
                     if start >= 0 and start + L <= self.reference.get_transcript(tidx).length:

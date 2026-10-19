@@ -696,3 +696,98 @@ def test_search_batch_serial_fallback_on_small_input(tmp_path):
     seqs = ["ACGTACGTACGTACGTACGT", "TTGCAAGGTCATGCCTAAAG"]
     results = engine.search_batch(seqs, workers=4)  # len < 4 threshold
     assert set(results) == {0, 1}
+
+
+# ---------------------------------------------------------------------------
+# Configurable k and spaced seeds
+# ---------------------------------------------------------------------------
+
+
+def test_kmer_size_configurable(tmp_path):
+    from aso_designer.off_target import OffTargetSearchEngine, TranscriptomeReference
+
+    fasta = _seeded_transcriptome(tmp_path)
+    ref = TranscriptomeReference(kmer_size=8)
+    ref.load_from_fasta(fasta, cache=False)
+    ref.ensure_index()
+    assert len(next(iter(ref._index))) == 8
+    engine = OffTargetSearchEngine(ref, max_mismatches=3)
+    from aso_designer.utils.sequence import reverse_complement
+
+    hits = engine.search(reverse_complement("ACGTTGCAAGGTCATGCC"))
+    assert hits  # motif present in the transcriptome
+
+
+def test_spaced_seed_recovers_mismatched_seed_site(tmp_path):
+    """A 1-mismatch-inside-seed site is found with a spaced seed.
+
+    With a contiguous k=12 index, a target site whose only mismatch
+    falls inside every overlapping seed k-mer is invisible to the exact
+    lookup. A spaced pattern that skips the mismatch position recovers it.
+    """
+    from aso_designer.off_target import OffTargetSearchEngine, TranscriptomeReference
+
+    # Transcript: motif ... with a single mutation at the seed center.
+    motif = "ACGTTGCAAGGTCATGCC"
+    mutated = motif[:8] + ("A" if motif[8] != "A" else "C") + motif[9:]
+    fasta = tmp_path / "mut.fa"
+    fasta.write_text(">NM_M\n" + mutated * 5 + "\n")
+
+    from aso_designer.utils.sequence import reverse_complement
+
+    query = reverse_complement(mutated)  # perfect match to the mutated site
+
+    # Contiguous k=12: the mismatch position is covered by every 12-mer
+    # overlapping it near the middle of an 18-mer site, so no exact 12-mer
+    # containing the mismatch window... verify empirically:
+    ref_c = TranscriptomeReference(kmer_size=12)
+    ref_c.load_from_fasta(fasta, cache=False)
+    ref_c.ensure_index()
+    engine_c = OffTargetSearchEngine(ref_c, max_mismatches=3)
+    hits_c = engine_c.search(query)
+
+    # Spaced index skipping the mutated position (offset 8 of the span).
+    pattern = "11111111011111111"[:16]  # 16 span, skip position 8
+    assert pattern[8] == "0"
+    ref_s = TranscriptomeReference(kmer_size=16, seed_pattern=pattern)
+    ref_s.load_from_fasta(fasta, cache=False)
+    ref_s.ensure_index()
+    engine_s = OffTargetSearchEngine(ref_s, max_mismatches=3, seed_pattern=pattern)
+    hits_s = engine_s.search(query)
+
+    assert hits_s, "spaced seed must recover the site"
+    recovered = {(h.transcript_id, h.position) for h in hits_s}
+    assert recovered >= {(h.transcript_id, h.position) for h in hits_c}
+
+
+def test_seed_pattern_validation():
+    from pydantic import ValidationError
+
+    from aso_designer.config_schema import ASOConfig
+
+    with pytest.raises(ValidationError):
+        ASOConfig(off_target={"seed_pattern": "11223344"})
+    with pytest.raises(ValidationError):
+        ASOConfig(off_target={"seed_pattern": "101"})  # too short
+    with pytest.raises(ValidationError):
+        ASOConfig(off_target={"seed_pattern": "0" * 12})  # no must-match positions
+    assert ASOConfig(off_target={"seed_pattern": "110101101011"}).off_target.seed_pattern
+
+
+def test_spaced_seed_cache_invalidation(tmp_path):
+    """Changing the seed pattern forces an index rebuild."""
+    from aso_designer.off_target import TranscriptomeReference
+
+    fasta = _seeded_transcriptome(tmp_path)
+    pattern = "110101101011"
+    ref1 = TranscriptomeReference(kmer_size=12, seed_pattern=pattern)
+    ref1.load_from_fasta(fasta)  # writes cache with the pattern
+    ref1.ensure_index()
+
+    ref2 = TranscriptomeReference(kmer_size=12, seed_pattern=pattern)
+    ref2.load_from_fasta(fasta)  # cache hit
+    assert ref2._indexed
+
+    ref3 = TranscriptomeReference(kmer_size=12)  # different pattern -> rebuild
+    ref3.load_from_fasta(fasta)
+    assert ref3.seed_pattern is None

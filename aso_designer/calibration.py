@@ -175,7 +175,7 @@ def calibrate_weights(
 
     return CalibrationResult(
         weights=weights,
-        coefficients={k: c for k, c in zip(COMPONENT_KEYS, coefs, strict=True)},
+        coefficients=dict(zip(COMPONENT_KEYS, coefs, strict=True)),
         r_squared=r_squared,
         n_samples=n,
         ridge=ridge,

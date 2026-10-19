@@ -1,7 +1,8 @@
 """Tests for the quality module: ORF detection, validation, metadata, and batch reports."""
 
-import pytest
 import random
+
+import pytest
 
 from aso_designer.quality import (
     TranscriptSet,

@@ -625,7 +625,10 @@ class ASOPipeline:
             )
             return
 
-        reference = TranscriptomeReference()
+        reference = TranscriptomeReference(
+            kmer_size=ot_cfg.kmer_size,
+            seed_pattern=ot_cfg.seed_pattern,
+        )
         try:
             reference.load_from_fasta(
                 transcriptome_path, cache=getattr(ot_cfg, "index_cache", True)
@@ -654,6 +657,7 @@ class ASOPipeline:
             max_mismatches=ot_cfg.max_mismatches,
             seed_start=ot_cfg.seed_start,
             seed_end=ot_cfg.seed_end,
+            seed_pattern=ot_cfg.seed_pattern,
         )
 
         passing = [c for c in self._candidates if c.passes_filters]

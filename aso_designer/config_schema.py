@@ -284,6 +284,18 @@ class OffTargetConfig(BaseModel):
             "(keyed by FASTA hash and k) and reuse it on repeat runs."
         ),
     )
+    kmer_size: conint(ge=8, le=20) = Field(
+        default=12,
+        description="k-mer size for the transcriptome index.",
+    )
+    seed_pattern: str | None = Field(
+        default=None,
+        description=(
+            "Spaced-seed pattern of 0/1 (e.g. '1101011'): index and lookup "
+            "use only the '1' positions, recovering 1-mismatch seed sites "
+            "a contiguous k-mer index misses. None = contiguous k-mers."
+        ),
+    )
     workers: conint(ge=0, le=64) = Field(
         default=0,
         description=(
@@ -298,6 +310,20 @@ class OffTargetConfig(BaseModel):
         if self.seed_start >= self.seed_end:
             raise ValueError("seed_start must be < seed_end")
         return self
+
+    @field_validator("seed_pattern")
+    @classmethod
+    def validate_seed_pattern(cls, v: str | None) -> str | None:
+        """Validate the spaced-seed pattern shape."""
+        if v is None:
+            return v
+        if len(v) < 8 or len(v) > 16:
+            raise ValueError("seed_pattern length must be 8-16")
+        if any(c not in "01" for c in v):
+            raise ValueError("seed_pattern must contain only 0 and 1")
+        if v.count("1") < 6:
+            raise ValueError("seed_pattern needs at least 6 '1' positions")
+        return v
 
 
 class VariantConfig(BaseModel):
