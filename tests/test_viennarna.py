@@ -12,6 +12,7 @@ import pytest
 from aso_designer.utils.exceptions import ViennaRNAError
 from aso_designer.viennarna import (
     ViennaRNAVersion,
+    _parse_dotplot_ps,
     _parse_rnacofold_output,
     _parse_rnaduplex_output,
     _parse_rnafold_output,
@@ -157,6 +158,77 @@ class TestParseRnafoldOutput:
         with pytest.raises(ViennaRNAError, match="Could not parse"):
             _parse_rnafold_output("AUGCAUGC", "no useful data here")
 
+    def test_partition_function_bracket_ensemble(self):
+        """Piped RNAfold -p output carries the ensemble energy in brackets
+        on the pf-structure line (captured ViennaRNA format)."""
+        mock = (
+            ">test\nAUGCAUGC\n"
+            "((((...)))) (-2.30)\n"
+            "((((...))))} [-2.96]\n"
+            "((((...)))) {-2.30 d=0.50}\n"
+            " frequency of mfe structure in ensemble 0.45; ensemble diversity 1.20\n"
+        )
+        r = _parse_rnafold_output("AUGCAUGC", mock, partition_function=True)
+        assert r.structure == "((((...))))"
+        assert r.mfe == -2.30
+        assert r.ensemble_dg == -2.96
+
+    def test_partition_function_explicit_ensemble_line(self):
+        mock = (
+            ">test\nAUGCAUGC\n"
+            "((((...)))) (-2.30)\n"
+            " free energy of ensemble = -3.12 kcal/mol\n"
+            " frequency of mfe structure in ensemble 0.45\n"
+        )
+        r = _parse_rnafold_output("AUGCAUGC", mock, partition_function=True)
+        assert r.ensemble_dg == -3.12
+
+    def test_partition_function_missing_ensemble_raises(self):
+        mock = ">test\nAUGCAUGC\n((((...)))) (-2.30)\n"
+        with pytest.raises(ViennaRNAError, match="ensemble free energy"):
+            _parse_rnafold_output("AUGCAUGC", mock, partition_function=True)
+
+    def test_mfe_output_has_no_ensemble_fields(self):
+        mock = ">test\nAUGCAUGC\n((((...)))) (-2.30)\n"
+        r = _parse_rnafold_output("AUGCAUGC", mock)
+        assert r.ensemble_dg is None
+        assert r.pair_probs is None
+
+
+# ---------------------------------------------------------------------------
+# RNAfold dot-plot parsing (base-pair probabilities)
+# ---------------------------------------------------------------------------
+
+
+class TestParseDotplotPs:
+    def test_parse_ubox_lines(self, tmp_path):
+        """ubox lines carry sqrt(p); lbox (MFE pairs) and comments are ignored."""
+        dp = tmp_path / "test_dp.ps"
+        dp.write_text(
+            "%ViennaRNA PostScript plot of base pair probabilities\n"
+            "% i  j  sqrt(p(i,j)) ubox\n"
+            "1 4 0.9486833 ubox\n"
+            "2 3 0.7000000 ubox\n"
+            "1 4 0.9500000 lbox\n"
+            "showpage\n"
+        )
+        probs = _parse_dotplot_ps(dp)
+        assert probs[(1, 4)] == pytest.approx(0.9, abs=1e-5)
+        assert probs[(2, 3)] == pytest.approx(0.49, abs=1e-6)
+        assert len(probs) == 2
+
+    def test_parse_multi_triplet_line(self, tmp_path):
+        dp = tmp_path / "test_dp.ps"
+        dp.write_text("1 5 0.5000000 2 6 0.6000000 ubox\n")
+        probs = _parse_dotplot_ps(dp)
+        assert probs[(1, 5)] == pytest.approx(0.25)
+        assert probs[(2, 6)] == pytest.approx(0.36)
+
+    def test_lower_triangle_ignored(self, tmp_path):
+        dp = tmp_path / "test_dp.ps"
+        dp.write_text("4 1 0.9486833 ubox\n")
+        assert _parse_dotplot_ps(dp) == {}
+
 
 # ---------------------------------------------------------------------------
 # RNAfold wrapper (mocked subprocess)
@@ -183,6 +255,54 @@ class TestRunRnafold:
         mock_run.side_effect = subprocess.SubprocessError("boom")
         with pytest.raises(ViennaRNAError, match="execution failed"):
             run_rnafold("ATGCATGC")
+
+    @patch("aso_designer.viennarna._get_tool_path")
+    @patch("aso_designer.viennarna.subprocess.run")
+    def test_run_mfe_has_no_pf_flag(self, mock_run, mock_path):
+        mock_path.return_value = "/usr/local/bin/RNAfold"
+        mock_run.return_value = MagicMock(
+            stdout=">test\nAUGCAUGC\n((((...)))) (-2.30)\n", stderr=""
+        )
+        run_rnafold("ATGCATGC")
+        assert "-p" not in mock_run.call_args.args[0]
+
+    @patch("aso_designer.viennarna._get_tool_path")
+    @patch("aso_designer.viennarna.subprocess.run")
+    def test_run_partition_function(self, mock_run, mock_path, tmp_path):
+        """-p runs in a temp dir, reads base-pair probabilities from the
+        dot-plot file, and parses the bracketed ensemble energy."""
+        mock_path.return_value = "/usr/local/bin/RNAfold"
+        captured_args: list[list[str]] = []
+
+        def side_effect(*args, **kwargs):
+            captured_args.append(args[0])
+            dp = Path(kwargs["cwd"]) / "test_dp.ps"
+            dp.write_text("% i  j  sqrt(p(i,j)) ubox\n1 4 0.9486833 ubox\n2 3 0.7071068 ubox\n")
+            return MagicMock(
+                stdout=">test\nAUGCAUGC\n((((...)))) (-2.30)\n((((...))))} [-2.96]\n",
+                stderr="",
+            )
+
+        mock_run.side_effect = side_effect
+        r = run_rnafold("ATGCATGC", partition_function=True)
+        assert "--noPS" in captured_args[0]
+        assert "-p" in captured_args[0]
+        assert r.mfe == -2.30
+        assert r.ensemble_dg == -2.96
+        assert r.pair_probs is not None
+        assert r.pair_probs[(1, 4)] == pytest.approx(0.9, abs=1e-5)
+        assert r.pair_probs[(2, 3)] == pytest.approx(0.5, abs=1e-4)
+
+    @patch("aso_designer.viennarna._get_tool_path")
+    @patch("aso_designer.viennarna.subprocess.run")
+    def test_run_partition_function_missing_dotplot(self, mock_run, mock_path):
+        mock_path.return_value = "/usr/local/bin/RNAfold"
+        mock_run.return_value = MagicMock(
+            stdout=">test\nAUGCAUGC\n((((...)))) (-2.30)\n((((...))))} [-2.96]\n",
+            stderr="",
+        )
+        with pytest.raises(ViennaRNAError, match="did not produce a dot-plot"):
+            run_rnafold("ATGCATGC", partition_function=True)
 
 
 # ---------------------------------------------------------------------------

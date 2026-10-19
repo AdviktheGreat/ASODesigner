@@ -42,11 +42,21 @@ class TargetStructure:
         Dot-bracket MFE structure from RNAfold.
     mfe : float
         Minimum free energy in kcal/mol.
+    ensemble_dg : float or None
+        Free energy of the ensemble in kcal/mol (only set when the
+        structure was predicted with the partition function).
+    pair_probs : dict or None
+        Base-pair probabilities ``{(i, j): p}`` with 1-based ``i < j``
+        (only set when the structure was predicted with the partition
+        function; pairs below RNAfold's dot-plot threshold ~1e-5 are
+        absent).
     """
 
     sequence: str
     structure: str
     mfe: float
+    ensemble_dg: float | None = None
+    pair_probs: dict[tuple[int, int], float] | None = None
 
     @classmethod
     def from_rnafold_result(cls, result: RNAfoldResult) -> TargetStructure:
@@ -55,7 +65,31 @@ class TargetStructure:
             sequence=result.sequence,
             structure=result.structure,
             mfe=result.mfe,
+            ensemble_dg=result.ensemble_dg,
+            pair_probs=result.pair_probs,
         )
+
+    def mean_pair_prob(self, start: int, end: int) -> float | None:
+        """Mean ensemble pairing probability over a 1-based window.
+
+        For each position in the window the probability of being
+        base-paired is the sum of the probabilities of all stored pairs
+        involving that position; pairs below RNAfold's dot-plot
+        threshold contribute negligibly. Returns None when no
+        partition-function data is available.
+        """
+        if self.pair_probs is None:
+            return None
+        if start < 1 or end < start:
+            raise ValueError(f"Invalid window [{start}, {end}]")
+        per_position: dict[int, float] = {}
+        for (i, j), p in self.pair_probs.items():
+            if start <= i <= end:
+                per_position[i] = per_position.get(i, 0.0) + p
+            if start <= j <= end:
+                per_position[j] = per_position.get(j, 0.0) + p
+        values = [per_position.get(pos, 0.0) for pos in range(start, end + 1)]
+        return sum(values) / len(values)
 
 
 @dataclass
@@ -253,6 +287,40 @@ class TargetStructurePredictor:
 
         logger.info("Running RNAfold on sequence of length %d", len(rna_seq))
         result = run_rnafold(rna_seq)
+        structure = TargetStructure.from_rnafold_result(result)
+
+        self._save_cache(cache_key, structure)
+        return structure
+
+    def predict_ensemble(self, sequence: str) -> TargetStructure:
+        """Predict structure with the RNAfold partition function.
+
+        Runs RNAfold with ``-p`` and returns a TargetStructure whose
+        ``ensemble_dg`` and ``pair_probs`` fields carry the ensemble
+        free energy and the base-pair probabilities (see
+        ``run_rnafold``). Results are cached separately from plain MFE
+        predictions.
+
+        Parameters
+        ----------
+        sequence : str
+            DNA or RNA sequence (case-insensitive).
+
+        Returns
+        -------
+        TargetStructure
+            MFE structure plus ensemble energy and pair probabilities.
+        """
+        rna_seq = dna_to_rna(sequence)
+
+        cache_key = self._cache_key(rna_seq, "structure_pf")
+        cached = self._load_cache(cache_key)
+        if cached is not None:
+            logger.debug("Using cached partition-function structure for length %d", len(rna_seq))
+            return cached
+
+        logger.info("Running RNAfold (-p) on sequence of length %d", len(rna_seq))
+        result = run_rnafold(rna_seq, partition_function=True)
         structure = TargetStructure.from_rnafold_result(result)
 
         self._save_cache(cache_key, structure)

@@ -95,6 +95,48 @@ class TestTargetStructure:
         assert ts.sequence == "AUGCAUGCAUGCAUGC"
         assert ts.structure == "((((....))))...."
         assert ts.mfe == -3.40
+        assert ts.ensemble_dg is None
+        assert ts.pair_probs is None
+
+    def test_from_rnafold_result_partition_function(self):
+        result = RNAfoldResult(
+            sequence="AUGCAUGC",
+            structure="((((....))))",
+            mfe=-3.40,
+            ensemble_dg=-3.90,
+            pair_probs={(1, 8): 0.9, (2, 7): 0.6},
+        )
+        ts = TargetStructure.from_rnafold_result(result)
+        assert ts.ensemble_dg == -3.90
+        assert ts.pair_probs == {(1, 8): 0.9, (2, 7): 0.6}
+
+    def test_mean_pair_prob(self):
+        ts = TargetStructure(
+            sequence="AUGCAUGC",
+            structure="((((....))))",
+            mfe=-3.40,
+            pair_probs={(1, 4): 0.9, (2, 5): 0.6},
+        )
+        # Window [1, 2]: position 1 paired with 0.9, position 2 with 0.6
+        assert ts.mean_pair_prob(1, 2) == pytest.approx(0.75)
+        # Window [3, 4]: position 3 unpaired, position 4 paired (with 1) 0.9
+        assert ts.mean_pair_prob(3, 4) == pytest.approx(0.45)
+        # Positions 6-8 have no stored pairs → 0.0
+        assert ts.mean_pair_prob(6, 8) == 0.0
+
+    def test_mean_pair_prob_none_without_pf(self, mock_rnafold_result):
+        ts = TargetStructure.from_rnafold_result(mock_rnafold_result)
+        assert ts.mean_pair_prob(1, 4) is None
+
+    def test_mean_pair_prob_invalid_window(self):
+        ts = TargetStructure(
+            sequence="AUGCAUGC",
+            structure="((((....))))",
+            mfe=-3.40,
+            pair_probs={(1, 8): 0.9},
+        )
+        with pytest.raises(ValueError, match="Invalid window"):
+            ts.mean_pair_prob(4, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +565,59 @@ class TestPredictorMultiLength:
         p1.predict_accessibility("ATGCATGC")
         p2.predict_accessibility("ATGCATGC")
         assert mock_rnaplfold.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# TargetStructurePredictor partition-function ensemble
+# ---------------------------------------------------------------------------
+
+
+class TestPredictorEnsemble:
+    @patch("aso_designer.accessibility.run_rnafold")
+    def test_predict_ensemble(self, mock_rnafold, tmp_path):
+        mock_rnafold.return_value = RNAfoldResult(
+            sequence="AUGCAUGC",
+            structure="((((....))))",
+            mfe=-3.40,
+            ensemble_dg=-3.90,
+            pair_probs={(1, 8): 0.9, (2, 7): 0.6},
+        )
+        predictor = TargetStructurePredictor(cache_dir=tmp_path)
+        ts = predictor.predict_ensemble("ATGCATGC")
+        assert mock_rnafold.call_args.kwargs["partition_function"] is True
+        assert ts.ensemble_dg == -3.90
+        assert ts.pair_probs == {(1, 8): 0.9, (2, 7): 0.6}
+        assert ts.mean_pair_prob(1, 2) == pytest.approx(0.75)
+
+    @patch("aso_designer.accessibility.run_rnafold")
+    def test_ensemble_cached(self, mock_rnafold, tmp_path):
+        mock_rnafold.return_value = RNAfoldResult(
+            sequence="AUGCAUGC",
+            structure="((((....))))",
+            mfe=-3.40,
+            ensemble_dg=-3.90,
+            pair_probs={(1, 8): 0.9},
+        )
+        predictor = TargetStructurePredictor(cache_dir=tmp_path)
+        predictor.predict_ensemble("ATGCATGC")
+        predictor.predict_ensemble("ATGCATGC")
+        assert mock_rnafold.call_count == 1
+
+    @patch("aso_designer.accessibility.run_rnafold")
+    def test_mfe_and_ensemble_use_distinct_cache(self, mock_rnafold, tmp_path):
+        mock_rnafold.return_value = RNAfoldResult(
+            sequence="AUGCAUGC", structure="((((....))))", mfe=-3.40
+        )
+        predictor = TargetStructurePredictor(cache_dir=tmp_path)
+        ts1 = predictor.predict_structure("ATGCATGC")
+        ts2 = predictor.predict_ensemble("ATGCATGC")
+        assert mock_rnafold.call_count == 2
+        assert ts1.pair_probs is None
+        assert ts2.pair_probs is None
+        # MFE call has no partition_function flag; ensemble call does
+        first_kwargs = mock_rnafold.call_args_list[0].kwargs
+        assert first_kwargs.get("partition_function", False) is False
+        assert mock_rnafold.call_args_list[1].kwargs["partition_function"] is True
 
 
 # ---------------------------------------------------------------------------

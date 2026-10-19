@@ -407,6 +407,12 @@ class ASOPipeline:
         method the mean opening energy over the binding window is also
         stored in ``candidate.features["accessibility_opening_dg"]``.
 
+        Additionally runs RNAfold with the partition function (cached)
+        and stores the mean ensemble base-pairing probability over the
+        binding window in ``candidate.features["ensemble_pair_prob"]``;
+        ensemble failure is logged and skipped without affecting the
+        accessibility scores.
+
         Requires ViennaRNA; raises ViennaRNAError if unavailable. The
         pipeline treats this stage as non-fatal and continues with
         neutral accessibility scores.
@@ -415,7 +421,7 @@ class ASOPipeline:
             TargetStructurePredictor,
             score_window_accessibility,
         )
-        from aso_designer.viennarna import verify_viennarna
+        from aso_designer.viennarna import ViennaRNAError, verify_viennarna
 
         if self._transcript is None:
             raise RuntimeError("No transcript available for accessibility analysis")
@@ -439,6 +445,12 @@ class ASOPipeline:
         )
         profile = predictor.predict_accessibility(self._transcript.sequence)
 
+        try:
+            ensemble = predictor.predict_ensemble(self._transcript.sequence)
+        except ViennaRNAError as e:
+            logger.warning("Ensemble structure prediction failed: %s", e)
+            ensemble = None
+
         computed = 0
         for candidate in self._candidates:
             if not candidate.passes_filters:
@@ -453,6 +465,10 @@ class ASOPipeline:
                 window_dg = profile.opening_dg[candidate.start : candidate.end]
                 if window_dg:
                     candidate.features["accessibility_opening_dg"] = sum(window_dg) / len(window_dg)
+            if ensemble is not None:
+                mean_pair = ensemble.mean_pair_prob(candidate.start + 1, candidate.end)
+                if mean_pair is not None:
+                    candidate.features["ensemble_pair_prob"] = round(mean_pair, 4)
             computed += 1
 
         logger.info("Computed accessibility for %d candidates", computed)

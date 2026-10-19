@@ -12,7 +12,7 @@ import pytest
 
 from aso_designer.pipeline import ASOPipeline, PipelineConfig
 from aso_designer.transcript_fetcher import TranscriptRecord
-from aso_designer.viennarna import RNAplfoldResult, RNAupResult, ViennaRNAError
+from aso_designer.viennarna import RNAfoldResult, RNAplfoldResult, RNAupResult, ViennaRNAError
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -265,6 +265,60 @@ class TestAccessibilityStage:
 
         for c in passing_candidates(pipeline):
             assert "accessibility_opening_dg" not in c.features
+
+    @patch("aso_designer.viennarna.verify_viennarna")
+    @patch("aso_designer.accessibility.run_rnafold")
+    @patch("aso_designer.accessibility.run_rnaplfold")
+    def test_ensemble_pair_prob_feature(
+        self, mock_plfold, mock_rnafold, mock_verify, mock_rnaplfold_result
+    ):
+        """RNAfold -p ensemble pairing probabilities feed a per-candidate
+        feature: the mean pairing probability over the binding window."""
+        mock_verify.return_value = MagicMock()
+        mock_plfold.return_value = mock_rnaplfold_result
+        n = len(TRANSCRIPT_SEQ)
+        pair_probs = {(i, i + 3): 0.5 for i in range(1, n // 2 + 1, 4)}
+        mock_rnafold.return_value = RNAfoldResult(
+            sequence=TRANSCRIPT_SEQ.replace("T", "U"),
+            structure="." * n,
+            mfe=-1.0,
+            ensemble_dg=-2.0,
+            pair_probs=pair_probs,
+        )
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_accessibility()
+
+        per_pos: dict[int, float] = {}
+        for (i, j), p in pair_probs.items():
+            for pos in (i, j):
+                per_pos[pos] = per_pos.get(pos, 0.0) + p
+        for c in passing_candidates(pipeline):
+            assert "ensemble_pair_prob" in c.features
+            expected = sum(per_pos.get(p, 0.0) for p in range(c.start + 1, c.end + 1)) / (
+                c.end - c.start
+            )
+            assert c.features["ensemble_pair_prob"] == pytest.approx(expected, abs=2e-4)
+
+    @patch("aso_designer.viennarna.verify_viennarna")
+    @patch("aso_designer.accessibility.run_rnafold")
+    @patch("aso_designer.accessibility.run_rnaplfold")
+    def test_ensemble_failure_skips_feature(
+        self, mock_plfold, mock_rnafold, mock_verify, mock_rnaplfold_result
+    ):
+        """A failing partition-function run must not affect accessibility."""
+        mock_verify.return_value = MagicMock()
+        mock_plfold.return_value = mock_rnaplfold_result
+        mock_rnafold.side_effect = ViennaRNAError("RNAfold failed")
+
+        pipeline = make_pipeline()
+        run_through_filter(pipeline)
+        pipeline._stage_accessibility()
+
+        for c in passing_candidates(pipeline):
+            assert "accessibility_score" in c.features
+            assert "ensemble_pair_prob" not in c.features
 
 
 # ---------------------------------------------------------------------------

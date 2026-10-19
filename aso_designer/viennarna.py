@@ -163,11 +163,21 @@ class RNAfoldResult:
         Dot-bracket secondary structure notation.
     mfe : float
         Minimum free energy in kcal/mol.
+    ensemble_dg : float or None
+        Free energy of the ensemble in kcal/mol (only set when the
+        computation ran with ``partition_function=True``).
+    pair_probs : dict or None
+        Base-pair probabilities as ``{(i, j): p}`` with 1-based
+        ``i < j`` (only set with ``partition_function=True``). Pairs
+        below RNAfold's dot-plot reporting threshold (~1e-5) are
+        absent.
     """
 
     sequence: str
     structure: str
     mfe: float
+    ensemble_dg: float | None = None
+    pair_probs: dict[tuple[int, int], float] | None = None
 
 
 def run_rnafold(
@@ -182,19 +192,30 @@ def run_rnafold(
     second. Inspired by GuideX's _calculate_mfe but extended to
     return the full structure, not just MFE.
 
+    With ``partition_function=True`` RNAfold also computes the
+    partition function (``-p``). The base-pair probability matrix is
+    read from the ``*_dp.ps`` dot-plot file RNAfold writes (with
+    ``--noPS`` the structure plot is skipped but the dot plot is
+    still produced), so the run happens in a temporary directory
+    regardless of ``no_ps``.
+
     Parameters
     ----------
     sequence : str
         DNA or RNA sequence (case-insensitive).
     no_ps : bool
-        Suppress PostScript output (default True).
+        Suppress PostScript structure output (default True). Ignored
+        for the temporary directory used in partition-function mode.
     partition_function : bool
-        Compute partition function in addition to MFE (default False).
+        Compute partition function and base-pair probabilities
+        (default False).
 
     Returns
     -------
     RNAfoldResult
-        Sequence, dot-bracket structure, and MFE.
+        Sequence, dot-bracket structure, and MFE; with
+        ``partition_function=True`` also the ensemble free energy and
+        base-pair probabilities.
 
     Raises
     ------
@@ -212,27 +233,73 @@ def run_rnafold(
 
     input_data = f">{sequence}\n{rna_seq}\n"
 
-    try:
-        result = subprocess.run(
-            args,
-            input=input_data,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=60,
-        )
-    except subprocess.SubprocessError as e:
-        raise ViennaRNAError(f"RNAfold execution failed: {e}") from e
+    if not partition_function:
+        try:
+            result = subprocess.run(
+                args,
+                input=input_data,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60,
+            )
+        except subprocess.SubprocessError as e:
+            raise ViennaRNAError(f"RNAfold execution failed: {e}") from e
 
-    return _parse_rnafold_output(rna_seq, result.stdout)
+        return _parse_rnafold_output(rna_seq, result.stdout, partition_function=False)
+
+    # Partition-function mode runs in a temporary directory so the
+    # dot-plot file RNAfold writes is not left in the working directory.
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            result = subprocess.run(
+                args,
+                input=input_data,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=300,
+                cwd=tmpdir,
+            )
+        except subprocess.SubprocessError as e:
+            raise ViennaRNAError(f"RNAfold execution failed: {e}") from e
+
+        parsed = _parse_rnafold_output(rna_seq, result.stdout, partition_function=True)
+        if parsed.pair_probs is None:
+            dp_files = sorted(Path(tmpdir).glob("*_dp.ps"))
+            if not dp_files:
+                dp_files = sorted(
+                    p for p in Path(tmpdir).glob("*.ps") if not p.name.endswith("_dp2.ps")
+                )
+            if not dp_files:
+                raise ViennaRNAError(
+                    "RNAfold did not produce a dot-plot file (required for base-pair probabilities)"
+                )
+            probs = _parse_dotplot_ps(dp_files[0])
+            if not probs:
+                raise ViennaRNAError(
+                    f"No base-pair probabilities found in dot-plot file {dp_files[0]}"
+                )
+            parsed.pair_probs = probs
+        return parsed
 
 
-def _parse_rnafold_output(rna_seq: str, stdout: str) -> RNAfoldResult:
+def _parse_rnafold_output(
+    rna_seq: str, stdout: str, partition_function: bool = False
+) -> RNAfoldResult:
     """Parse RNAfold stdout with multi-strategy approach.
 
     Strategy 1: Find the line starting with the RNA sequence,
     extract the dot-bracket and MFE from the following line.
     Strategy 2: Regex fallback for MFE only.
+
+    In partition-function mode the stdout additionally carries the
+    free energy of the ensemble, either as an explicit
+    ``free energy of ensemble = <x> kcal/mol`` line (terminal output)
+    or as a bracketed value ``[<x>]`` appended to the pf-structure
+    line (piped output, ViennaRNA >= 2.3).
     """
     lines = stdout.strip().split("\n")
 
@@ -245,6 +312,8 @@ def _parse_rnafold_output(rna_seq: str, stdout: str) -> RNAfoldResult:
             seq_line_idx = i
             break
 
+    parsed: RNAfoldResult | None = None
+
     if seq_line_idx is not None and seq_line_idx + 1 < len(lines):
         structure_line = lines[seq_line_idx + 1].strip()
         # Structure line: "((((...)))) (-2.30)"
@@ -255,25 +324,89 @@ def _parse_rnafold_output(rna_seq: str, stdout: str) -> RNAfoldResult:
             mfe_str = parts[1].strip("()")
             try:
                 mfe = float(mfe_str)
-                return RNAfoldResult(sequence=rna_seq, structure=structure, mfe=mfe)
+                parsed = RNAfoldResult(sequence=rna_seq, structure=structure, mfe=mfe)
             except ValueError:
                 pass
 
-    # Strategy 2: Regex fallback for MFE
-    mfe_match = re.search(r"\(\s*(-?\d+\.\d+)\s*\)", stdout)
-    if mfe_match:
-        mfe = float(mfe_match.group(1))
-        # Try to extract structure from the line before the MFE
-        structure = ""
-        for line in lines:
-            if "(" in line and ")" in line and not line.startswith(">"):
-                bracket_part = line.rsplit(" ", 1)[0]
-                if all(c in "()." for c in bracket_part):
-                    structure = bracket_part
-                    break
-        return RNAfoldResult(sequence=rna_seq, structure=structure, mfe=mfe)
+    if parsed is None:
+        # Strategy 2: Regex fallback for MFE
+        mfe_match = re.search(r"\(\s*(-?\d+\.\d+)\s*\)", stdout)
+        if mfe_match:
+            mfe = float(mfe_match.group(1))
+            # Try to extract structure from the line before the MFE
+            structure = ""
+            for line in lines:
+                if "(" in line and ")" in line and not line.startswith(">"):
+                    bracket_part = line.rsplit(" ", 1)[0]
+                    if all(c in "()." for c in bracket_part):
+                        structure = bracket_part
+                        break
+            parsed = RNAfoldResult(sequence=rna_seq, structure=structure, mfe=mfe)
 
-    raise ViennaRNAError(f"Could not parse RNAfold output: {stdout[:200]}")
+    if parsed is None:
+        raise ViennaRNAError(f"Could not parse RNAfold output: {stdout[:200]}")
+
+    if not partition_function:
+        return parsed
+
+    parsed.ensemble_dg = _parse_ensemble_energy(lines)
+    return parsed
+
+
+def _parse_ensemble_energy(lines: list[str]) -> float:
+    """Extract the free energy of the ensemble from RNAfold PF stdout.
+
+    Handles both output styles:
+    ``free energy of ensemble = -58.22 kcal/mol`` (terminal output)
+    and the bracketed ``[-58.22]`` appended to the pf-structure line
+    (piped output). Raises ViennaRNAError when neither is present.
+    """
+    pattern = re.compile(r"free energy of ensemble\s*=\s*(-?\d+(?:\.\d+)?)")
+    for line in lines:
+        match = pattern.search(line)
+        if match:
+            return float(match.group(1))
+
+    bracket_pattern = re.compile(r"\[(-?\d+(?:\.\d+)?)\]")
+    for line in lines:
+        match = bracket_pattern.search(line)
+        if match:
+            return float(match.group(1))
+
+    raise ViennaRNAError("Could not find ensemble free energy in RNAfold partition-function output")
+
+
+def _parse_dotplot_ps(filepath: Path) -> dict[tuple[int, int], float]:
+    """Parse base-pair probabilities from an RNAfold dot-plot file.
+
+    The ``*_dp.ps`` file lists pairs with p > threshold as::
+
+        % i  j  sqrt(p(i,j)) ubox
+        1 16 0.988398700 ubox
+
+    Probabilities are the square of the listed value. ``lbox`` lines
+    (the MFE-structure pairs in the lower triangle) are ignored.
+    """
+    probs: dict[tuple[int, int], float] = {}
+    with open(filepath) as f:
+        for line in f:
+            if "ubox" not in line:
+                continue
+            tokens = line.split()
+            values = tokens[:-1]  # drop the trailing "ubox" keyword
+            if len(values) % 3 != 0:
+                continue
+            for idx in range(0, len(values), 3):
+                try:
+                    i = int(values[idx])
+                    j = int(values[idx + 1])
+                    p = float(values[idx + 2]) ** 2
+                except ValueError:
+                    continue
+                if i < 1 or j <= i:
+                    continue
+                probs[(i, j)] = p
+    return probs
 
 
 # ---------------------------------------------------------------------------
