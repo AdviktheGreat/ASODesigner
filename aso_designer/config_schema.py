@@ -333,3 +333,17 @@ class ASOConfig(BaseModel):
     variant: VariantConfig = Field(default_factory=VariantConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
+
+    @model_validator(mode="after")
+    def validate_gapmer_geometry(self) -> "ASOConfig":
+        """Reject gapmer configs whose length does not match wings + gap."""
+        if self.candidate.chemistry == "gapmer":
+            expected = 2 * self.gapmer.wing_length + self.gapmer.gap_size
+            if self.candidate.length != expected:
+                raise ValueError(
+                    f"Invalid gapmer geometry: candidate.length {self.candidate.length} != "
+                    f"2 * gapmer.wing_length {self.gapmer.wing_length} + gapmer.gap_size "
+                    f"{self.gapmer.gap_size} (expected {expected}). Adjust candidate.length, "
+                    "gapmer.gap_size, or gapmer.wing_length."
+                )
+        return self

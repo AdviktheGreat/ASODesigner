@@ -44,7 +44,7 @@ class ChemistryDesign(Protocol):
         ...
 
 
-@dataclass
+@dataclass(frozen=True)
 class GapmerDesign:
     """Gapmer chemistry: DNA center + modified wings.
 
@@ -89,15 +89,12 @@ class GapmerDesign:
         """
         expected = 2 * self.wing_length + self.gap_size
         if length != expected:
-            # Try to adjust gap size to fit
-            remaining = length - 2 * self.wing_length
-            if remaining < 4:
-                raise ConfigurationError(
-                    f"Gapmer length {length} too short for wing_length "
-                    f"{self.wing_length} (need >= {2 * self.wing_length + 4})"
-                )
-            self.gap_size = remaining
-            logger.debug("Adjusted gap size to %d for length %d", self.gap_size, length)
+            raise ConfigurationError(
+                f"Invalid gapmer geometry: length {length} != "
+                f"2 * wing_length {self.wing_length} + gap_size {self.gap_size} "
+                f"(expected {expected}). Adjust candidate.length, "
+                "gapmer.gap_size, or gapmer.wing_length so they are consistent."
+            )
 
         wing_mod = MOD_MOE if self.wing_chemistry == "moe" else MOD_2OME
         pattern = (
@@ -112,7 +109,7 @@ class GapmerDesign:
         return True
 
 
-@dataclass
+@dataclass(frozen=True)
 class MixmerDesign:
     """Mixmer chemistry: interspersed modified and unmodified nucleotides.
 
@@ -169,7 +166,7 @@ class MixmerDesign:
         return False
 
 
-@dataclass
+@dataclass(frozen=True)
 class FullChemistryDesign:
     """Full-modification chemistry (2'-OMe, MOE, or morpholino).
 
@@ -245,6 +242,14 @@ def create_chemistry_design(
     if chemistry == "gapmer":
         if gapmer_config is None:
             gapmer_config = GapmerConfig()
+        expected = 2 * gapmer_config.wing_length + gapmer_config.gap_size
+        if config.length != expected:
+            raise ConfigurationError(
+                f"Invalid gapmer geometry: candidate.length {config.length} != "
+                f"2 * wing_length {gapmer_config.wing_length} + gap_size "
+                f"{gapmer_config.gap_size} (expected {expected}). Adjust "
+                "candidate.length, gapmer.gap_size, or gapmer.wing_length."
+            )
         return GapmerDesign(
             gap_size=gapmer_config.gap_size,
             wing_length=gapmer_config.wing_length,

@@ -45,13 +45,20 @@ def test_gapmer_2ome_wings() -> None:
     assert pattern[0] == "2OMe"
 
 
-def test_gapmer_auto_adjust_gap() -> None:
-    """Gapmer auto-adjusts gap size when length doesn't match."""
+def test_gapmer_rejects_mismatched_length() -> None:
+    """Gapmer build_pattern rejects lengths that don't match the layout."""
     design = GapmerDesign(gap_size=10, wing_length=5, wing_chemistry="moe")
-    # Length 18 instead of 20 — gap should shrink to 8
-    pattern = design.build_pattern(18)
-    assert len(pattern) == 18
-    assert pattern[5:13] == ["DNA"] * 8
+    with pytest.raises(ConfigurationError, match="Invalid gapmer geometry"):
+        design.build_pattern(18)  # expected 20, no silent gap mutation
+
+
+def test_gapmer_design_is_immutable() -> None:
+    """GapmerDesign instances cannot be mutated after creation."""
+    design = GapmerDesign(gap_size=10, wing_length=5, wing_chemistry="moe")
+    from dataclasses import FrozenInstanceError
+
+    with pytest.raises(FrozenInstanceError):
+        design.gap_size = 8  # type: ignore[misc]
 
 
 def test_gapmer_too_short() -> None:
@@ -151,6 +158,13 @@ def test_create_chemistry_gapmer_default_config() -> None:
     """Factory falls back to default GapmerConfig when none is provided."""
     design = create_chemistry_design(CandidateConfig(chemistry="gapmer"))
     assert isinstance(design, GapmerDesign)
+
+
+def test_create_chemistry_gapmer_geometry_mismatch() -> None:
+    """Factory rejects gapmer configs whose length breaks the geometry."""
+    cfg = CandidateConfig(chemistry="gapmer", length=22)
+    with pytest.raises(ConfigurationError, match="Invalid gapmer geometry"):
+        create_chemistry_design(cfg, gapmer_config=GapmerConfig(gap_size=10, wing_length=5))
 
 
 def test_create_chemistry_mixmer() -> None:

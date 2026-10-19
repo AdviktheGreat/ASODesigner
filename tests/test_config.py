@@ -90,7 +90,10 @@ class TestLoadConfig:
 
     def test_with_user_config(self, tmp_path):
         f = tmp_path / "custom.yaml"
-        f.write_text("candidate:\n  length: 18\n  gc_min: 0.35\n")
+        f.write_text(
+            "candidate:\n  length: 18\n  gc_min: 0.35\n"
+            "gapmer:\n  gap_size: 8\n  wing_length: 5\n"
+        )
         config = load_config(str(f))
         assert config.candidate.length == 18
         assert config.candidate.gc_min == 0.35
@@ -204,3 +207,38 @@ class TestApplyChemistryPreset:
         # The bonus is stored as metadata, not as a weight modification
         if "chemistry_bonus" in scoring:
             assert isinstance(scoring["chemistry_bonus"], (int, float))
+
+
+# ---------------------------------------------------------------------------
+# Gapmer geometry validation
+# ---------------------------------------------------------------------------
+
+
+def test_asoconfig_rejects_broken_gapmer_geometry():
+    """candidate.length inconsistent with gapmer wings+gap is rejected."""
+    from pydantic import ValidationError
+
+    from aso_designer.config_schema import ASOConfig
+
+    with pytest.raises(ValidationError, match="Invalid gapmer geometry"):
+        ASOConfig(
+            candidate={"chemistry": "gapmer", "length": 22},
+            gapmer={"gap_size": 10, "wing_length": 5},
+        )
+
+
+def test_asoconfig_accepts_consistent_gapmer_geometry():
+    from aso_designer.config_schema import ASOConfig
+
+    cfg = ASOConfig(
+        candidate={"chemistry": "gapmer", "length": 21},
+        gapmer={"gap_size": 11, "wing_length": 5},
+    )
+    assert cfg.candidate.length == 21
+
+
+def test_asoconfig_non_gapmer_ignores_geometry():
+    from aso_designer.config_schema import ASOConfig
+
+    cfg = ASOConfig(candidate={"chemistry": "mixmer", "length": 22})
+    assert cfg.candidate.length == 22
