@@ -268,6 +268,1594 @@ _HYBRID_INIT = (1.9, -3.9)
 # own 5'→3' direction, is the DNA strand's reverse complement (with T→U).
 _DNA_COMPLEMENT = str.maketrans("ACGT", "TGCA")
 
+# ---------------------------------------------------------------------------
+# DNA single-mismatch / dangling-end defect parameters (1 M NaCl)
+# ---------------------------------------------------------------------------
+# Source: Nearest Neighbor Database (Mittal, Turner & Mathews 2024), DNA
+# parameter tables downloaded from
+#   https://rna.urmc.rochester.edu/NNDB/parameter_tables/dna/
+# Underlying optical-melting data: 1x1 internal loops (single internal
+# mismatches; Allawi & SantaLucia 1998 and related compilations), terminal
+# mismatches (SantaLucia-compilation tables), and dangling ends
+# (Bommarito, Peyret & SantaLucia 2000, Biochemistry 39:3423).
+#
+# Units: dG37 and dH in kcal/mol at 37 C, 1 M NaCl; dS is derived at import
+# via dS = (dH - dG37) * 1000 / 310.15. A value of None (the '.' entries in
+# the source tables) marks a disallowed motif. Blocks of the 1x1 internal-
+# loop tables whose every entry equals 3.0 are the published fallback
+# penalties for wobble-closed motifs with insufficient experimental data
+# (dS = 0 for those entries).
+#
+# Key conventions (bottom strand written 3'->5' under the top strand):
+# - _INT11_DG37/DH: key "LT/LB|RT/RB" is expanded as (left closing pair
+#   "LT/LB", right closing pair "RT/RB"); grid key "XY" = (top mismatch
+#   base X, bottom mismatch base Y). The tabulated value REPLACES the two
+#   flanking Watson-Crick stacks (NNDB internal-loop composition).
+# - _TERMINAL_MISMATCH_DG37/DH: key "TB" = closing pair (top penultimate,
+#   bottom penultimate); grid key "XY" = (top terminal base X, bottom
+#   terminal base Y). The value REPLACES the terminal stack (NNDB
+#   "WC helix + terminal-mismatch" composition).
+# - _DANGLE_DG37/DH: key "TB|side" = closing pair and side ("top_3p" =
+#   3'-terminal dangle on the top strand; "bottom_5p" = 5'-terminal dangle
+#   on the bottom strand); value keyed by the dangling base. The value
+#   ADDS to the paired-region helix (NNDB dangle composition). Only WC and
+#   G.T-wobble closing pairs are tabulated.
+# ---------------------------------------------------------------------------
+
+_INT11_DG37: dict[str, dict[str, float | None]] = {
+    "AT/AT": {
+        "AA": 1.3,
+        "AC": 2.2,
+        "AG": 0.9,
+        "AT": 1.0,
+        "CA": 1.7,
+        "CC": 2.4,
+        "CG": 1.0,
+        "CT": 1.4,
+        "GA": 0.4,
+        "GC": 1.0,
+        "GG": 0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.7,
+        "TG": 2.0,
+        "TT": 1.4,
+    },
+    "AT/CG": {
+        "AA": 0.8,
+        "AC": 1.4,
+        "AG": -0.4,
+        "AT": 1.0,
+        "CA": 1.6,
+        "CC": 2.1,
+        "CG": 1.0,
+        "CT": 1.6,
+        "GA": -0.2,
+        "GC": 1.0,
+        "GG": -1.2,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.4,
+        "TG": 2.0,
+        "TT": 1.1,
+    },
+    "AT/GC": {
+        "AA": 1.0,
+        "AC": 1.7,
+        "AG": 0.3,
+        "AT": 1.0,
+        "CA": 1.5,
+        "CC": 2.0,
+        "CG": 1.0,
+        "CT": 1.0,
+        "GA": 0.1,
+        "GC": 1.0,
+        "GG": -0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.4,
+        "TG": 2.0,
+        "TT": 0.6,
+    },
+    "AT/GT": {
+        "AA": 2.0,
+        "AC": 2.7,
+        "AG": 1.3,
+        "AT": 1.0,
+        "CA": 2.5,
+        "CC": 3.0,
+        "CG": 1.0,
+        "CT": 2.0,
+        "GA": 1.1,
+        "GC": 1.0,
+        "GG": 0.7,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.4,
+        "TG": 2.0,
+        "TT": 1.6,
+    },
+    "AT/TA": {
+        "AA": 1.2,
+        "AC": 1.7,
+        "AG": 0.2,
+        "AT": 1.0,
+        "CA": 1.7,
+        "CC": 2.7,
+        "CG": 1.0,
+        "CT": 1.4,
+        "GA": 0.2,
+        "GC": 1.0,
+        "GG": -0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.4,
+        "TG": 2.0,
+        "TT": 1.4,
+    },
+    "AT/TG": {
+        "AA": 1.8,
+        "AC": 2.4,
+        "AG": 0.6,
+        "AT": 1.0,
+        "CA": 2.6,
+        "CC": 3.1,
+        "CG": 1.0,
+        "CT": 2.6,
+        "GA": 0.8,
+        "GC": 1.0,
+        "GG": -0.2,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.4,
+        "TG": 2.0,
+        "TT": 2.1,
+    },
+    "CG/AT": {
+        "AA": 1.1,
+        "AC": 2.1,
+        "AG": 0.8,
+        "AT": 1.0,
+        "CA": 1.7,
+        "CC": 1.8,
+        "CG": 1.0,
+        "CT": 1.4,
+        "GA": 0.5,
+        "GC": 1.0,
+        "GG": 0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.4,
+        "TG": 2.0,
+        "TT": 0.6,
+    },
+    "CG/CG": {
+        "AA": 0.6,
+        "AC": 1.2,
+        "AG": -0.5,
+        "AT": 1.0,
+        "CA": 1.6,
+        "CC": 1.5,
+        "CG": 1.0,
+        "CT": 1.6,
+        "GA": -0.1,
+        "GC": 1.0,
+        "GG": -1.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.0,
+        "TG": 2.0,
+        "TT": 0.3,
+    },
+    "CG/GC": {
+        "AA": 0.9,
+        "AC": 1.5,
+        "AG": 0.1,
+        "AT": 1.0,
+        "CA": 1.5,
+        "CC": 1.4,
+        "CG": 1.0,
+        "CT": 1.0,
+        "GA": 0.1,
+        "GC": 1.0,
+        "GG": -0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.0,
+        "TG": 2.0,
+        "TT": -0.2,
+    },
+    "CG/GT": {
+        "AA": 1.9,
+        "AC": 2.5,
+        "AG": 1.1,
+        "AT": 1.0,
+        "CA": 2.5,
+        "CC": 2.4,
+        "CG": 1.0,
+        "CT": 2.0,
+        "GA": 1.1,
+        "GC": 1.0,
+        "GG": 0.7,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.0,
+        "TG": 2.0,
+        "TT": 0.8,
+    },
+    "CG/TA": {
+        "AA": 1.0,
+        "AC": 1.5,
+        "AG": 0.1,
+        "AT": 1.0,
+        "CA": 1.7,
+        "CC": 2.0,
+        "CG": 1.0,
+        "CT": 1.4,
+        "GA": 0.3,
+        "GC": 1.0,
+        "GG": -0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.0,
+        "TG": 2.0,
+        "TT": 0.6,
+    },
+    "CG/TG": {
+        "AA": 1.6,
+        "AC": 2.2,
+        "AG": 0.5,
+        "AT": 1.0,
+        "CA": 2.6,
+        "CC": 2.5,
+        "CG": 1.0,
+        "CT": 2.6,
+        "GA": 0.9,
+        "GC": 1.0,
+        "GG": -0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.0,
+        "TG": 2.0,
+        "TT": 1.3,
+    },
+    "GC/AT": {
+        "AA": 0.9,
+        "AC": 2.1,
+        "AG": 0.5,
+        "AT": 1.0,
+        "CA": 1.4,
+        "CC": 1.8,
+        "CG": 1.0,
+        "CT": 1.4,
+        "GA": -0.1,
+        "GC": 1.0,
+        "GG": -0.7,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.0,
+        "TG": 2.0,
+        "TT": 1.1,
+    },
+    "GC/CG": {
+        "AA": 0.3,
+        "AC": 1.3,
+        "AG": -0.8,
+        "AT": 1.0,
+        "CA": 1.3,
+        "CC": 1.6,
+        "CG": 1.0,
+        "CT": 1.6,
+        "GA": -0.8,
+        "GC": 1.0,
+        "GG": -2.2,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.6,
+        "TG": 2.0,
+        "TT": 0.9,
+    },
+    "GC/GC": {
+        "AA": 0.6,
+        "AC": 1.6,
+        "AG": -0.1,
+        "AT": 1.0,
+        "CA": 1.2,
+        "CC": 1.5,
+        "CG": 1.0,
+        "CT": 1.0,
+        "GA": -0.5,
+        "GC": 1.0,
+        "GG": -1.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.6,
+        "TG": 2.0,
+        "TT": 0.3,
+    },
+    "GC/GT": {
+        "AA": 1.6,
+        "AC": 2.6,
+        "AG": 0.9,
+        "AT": 1.0,
+        "CA": 2.2,
+        "CC": 2.5,
+        "CG": 1.0,
+        "CT": 2.0,
+        "GA": 0.5,
+        "GC": 1.0,
+        "GG": -0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.6,
+        "TG": 2.0,
+        "TT": 1.3,
+    },
+    "GC/TA": {
+        "AA": 0.8,
+        "AC": 1.6,
+        "AG": -0.2,
+        "AT": 1.0,
+        "CA": 1.4,
+        "CC": 2.1,
+        "CG": 1.0,
+        "CT": 1.4,
+        "GA": -0.4,
+        "GC": 1.0,
+        "GG": -1.2,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.6,
+        "TG": 2.0,
+        "TT": 1.1,
+    },
+    "GC/TG": {
+        "AA": 1.3,
+        "AC": 2.3,
+        "AG": 0.2,
+        "AT": 1.0,
+        "CA": 2.3,
+        "CC": 2.6,
+        "CG": 1.0,
+        "CT": 2.6,
+        "GA": 0.2,
+        "GC": 1.0,
+        "GG": -1.2,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.6,
+        "TG": 2.0,
+        "TT": 1.9,
+    },
+    "GT/AT": {
+        "AA": 1.9,
+        "AC": 3.1,
+        "AG": 1.5,
+        "AT": 1.0,
+        "CA": 2.4,
+        "CC": 2.8,
+        "CG": 1.0,
+        "CT": 2.4,
+        "GA": 0.9,
+        "GC": 1.0,
+        "GG": 0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 3.0,
+        "TG": 2.0,
+        "TT": 2.1,
+    },
+    "GT/CG": {
+        "AA": 1.3,
+        "AC": 2.3,
+        "AG": 0.2,
+        "AT": 1.0,
+        "CA": 2.3,
+        "CC": 2.6,
+        "CG": 1.0,
+        "CT": 2.6,
+        "GA": 0.2,
+        "GC": 1.0,
+        "GG": -1.2,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.6,
+        "TG": 2.0,
+        "TT": 1.9,
+    },
+    "GT/GC": {
+        "AA": 1.6,
+        "AC": 2.6,
+        "AG": 0.9,
+        "AT": 1.0,
+        "CA": 2.2,
+        "CC": 2.5,
+        "CG": 1.0,
+        "CT": 2.0,
+        "GA": 0.5,
+        "GC": 1.0,
+        "GG": -0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.6,
+        "TG": 2.0,
+        "TT": 1.3,
+    },
+    "GT/GT": {
+        "AA": 3.0,
+        "AC": 3.0,
+        "AG": 3.0,
+        "AT": 3.0,
+        "CA": 3.0,
+        "CC": 3.0,
+        "CG": 3.0,
+        "CT": 3.0,
+        "GA": 3.0,
+        "GC": 3.0,
+        "GG": 3.0,
+        "GT": 3.0,
+        "TA": 3.0,
+        "TC": 3.0,
+        "TG": 3.0,
+        "TT": 3.0,
+    },
+    "GT/TA": {
+        "AA": 1.8,
+        "AC": 2.6,
+        "AG": 0.8,
+        "AT": 1.0,
+        "CA": 2.4,
+        "CC": 3.1,
+        "CG": 1.0,
+        "CT": 2.4,
+        "GA": 0.6,
+        "GC": 1.0,
+        "GG": -0.2,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.6,
+        "TG": 2.0,
+        "TT": 2.1,
+    },
+    "GT/TG": {
+        "AA": 3.0,
+        "AC": 3.0,
+        "AG": 3.0,
+        "AT": 3.0,
+        "CA": 3.0,
+        "CC": 3.0,
+        "CG": 3.0,
+        "CT": 3.0,
+        "GA": 3.0,
+        "GC": 3.0,
+        "GG": 3.0,
+        "GT": 3.0,
+        "TA": 3.0,
+        "TC": 3.0,
+        "TG": 3.0,
+        "TT": 3.0,
+    },
+    "TA/AT": {
+        "AA": 1.4,
+        "AC": 2.3,
+        "AG": 1.2,
+        "AT": 1.0,
+        "CA": 2.3,
+        "CC": 2.1,
+        "CG": 1.0,
+        "CT": 1.7,
+        "GA": 1.2,
+        "GC": 1.0,
+        "GG": 0.9,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.7,
+        "TG": 2.0,
+        "TT": 1.4,
+    },
+    "TA/CG": {
+        "AA": 0.9,
+        "AC": 1.4,
+        "AG": -0.1,
+        "AT": 1.0,
+        "CA": 2.1,
+        "CC": 1.8,
+        "CG": 1.0,
+        "CT": 2.0,
+        "GA": 0.5,
+        "GC": 1.0,
+        "GG": -0.7,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.4,
+        "TG": 2.0,
+        "TT": 1.1,
+    },
+    "TA/GC": {
+        "AA": 1.1,
+        "AC": 1.7,
+        "AG": 0.5,
+        "AT": 1.0,
+        "CA": 2.1,
+        "CC": 1.8,
+        "CG": 1.0,
+        "CT": 1.4,
+        "GA": 0.8,
+        "GC": 1.0,
+        "GG": 0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.4,
+        "TG": 2.0,
+        "TT": 0.6,
+    },
+    "TA/GT": {
+        "AA": 2.1,
+        "AC": 2.7,
+        "AG": 1.5,
+        "AT": 1.0,
+        "CA": 3.1,
+        "CC": 2.8,
+        "CG": 1.0,
+        "CT": 2.4,
+        "GA": 1.8,
+        "GC": 1.0,
+        "GG": 1.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.4,
+        "TG": 2.0,
+        "TT": 1.6,
+    },
+    "TA/TA": {
+        "AA": 1.3,
+        "AC": 1.7,
+        "AG": 0.4,
+        "AT": 1.0,
+        "CA": 2.2,
+        "CC": 2.4,
+        "CG": 1.0,
+        "CT": 1.7,
+        "GA": 0.9,
+        "GC": 1.0,
+        "GG": 0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 1.4,
+        "TG": 2.0,
+        "TT": 1.4,
+    },
+    "TA/TG": {
+        "AA": 1.9,
+        "AC": 2.4,
+        "AG": 0.9,
+        "AT": 1.0,
+        "CA": 3.1,
+        "CC": 2.8,
+        "CG": 1.0,
+        "CT": 3.0,
+        "GA": 1.5,
+        "GC": 1.0,
+        "GG": 0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.4,
+        "TG": 2.0,
+        "TT": 2.1,
+    },
+    "TG/AT": {
+        "AA": 2.1,
+        "AC": 3.1,
+        "AG": 1.8,
+        "AT": 1.0,
+        "CA": 2.7,
+        "CC": 2.8,
+        "CG": 1.0,
+        "CT": 2.4,
+        "GA": 1.5,
+        "GC": 1.0,
+        "GG": 1.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.4,
+        "TG": 2.0,
+        "TT": 1.6,
+    },
+    "TG/CG": {
+        "AA": 1.6,
+        "AC": 2.2,
+        "AG": 0.5,
+        "AT": 1.0,
+        "CA": 2.6,
+        "CC": 2.5,
+        "CG": 1.0,
+        "CT": 2.6,
+        "GA": 0.9,
+        "GC": 1.0,
+        "GG": -0.3,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.0,
+        "TG": 2.0,
+        "TT": 1.3,
+    },
+    "TG/GC": {
+        "AA": 1.9,
+        "AC": 2.5,
+        "AG": 1.1,
+        "AT": 1.0,
+        "CA": 2.5,
+        "CC": 2.4,
+        "CG": 1.0,
+        "CT": 2.0,
+        "GA": 1.1,
+        "GC": 1.0,
+        "GG": 0.7,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.0,
+        "TG": 2.0,
+        "TT": 0.8,
+    },
+    "TG/GT": {
+        "AA": 3.0,
+        "AC": 3.0,
+        "AG": 3.0,
+        "AT": 3.0,
+        "CA": 3.0,
+        "CC": 3.0,
+        "CG": 3.0,
+        "CT": 3.0,
+        "GA": 3.0,
+        "GC": 3.0,
+        "GG": 3.0,
+        "GT": 3.0,
+        "TA": 3.0,
+        "TC": 3.0,
+        "TG": 3.0,
+        "TT": 3.0,
+    },
+    "TG/TA": {
+        "AA": 2.0,
+        "AC": 2.5,
+        "AG": 1.1,
+        "AT": 1.0,
+        "CA": 2.7,
+        "CC": 3.0,
+        "CG": 1.0,
+        "CT": 2.4,
+        "GA": 1.3,
+        "GC": 1.0,
+        "GG": 0.7,
+        "GT": 2.0,
+        "TA": 1.0,
+        "TC": 2.0,
+        "TG": 2.0,
+        "TT": 1.6,
+    },
+    "TG/TG": {
+        "AA": 3.0,
+        "AC": 3.0,
+        "AG": 3.0,
+        "AT": 3.0,
+        "CA": 3.0,
+        "CC": 3.0,
+        "CG": 3.0,
+        "CT": 3.0,
+        "GA": 3.0,
+        "GC": 3.0,
+        "GG": 3.0,
+        "GT": 3.0,
+        "TA": 3.0,
+        "TC": 3.0,
+        "TG": 3.0,
+        "TT": 3.0,
+    },
+}
+
+_INT11_DH: dict[str, dict[str, float | None]] = {
+    "AT/AT": {
+        "AA": 12.9,
+        "AC": 1.5,
+        "AG": 10.7,
+        "AT": 1.5,
+        "CA": 10.4,
+        "CC": 14.7,
+        "CG": 10.4,
+        "CT": -1.6,
+        "GA": 1.8,
+        "GC": 1.5,
+        "GG": 1.6,
+        "GT": 1.5,
+        "TA": 10.4,
+        "TC": 3.5,
+        "TG": 10.4,
+        "TT": -4.8,
+    },
+    "AT/CG": {
+        "AA": 10.0,
+        "AC": 10.9,
+        "AG": 8.9,
+        "AT": 10.9,
+        "CA": 4.1,
+        "CC": 12.8,
+        "CG": 4.1,
+        "CT": 1.3,
+        "GA": 4.5,
+        "GC": 10.9,
+        "GG": -5.0,
+        "GT": 10.9,
+        "TA": 4.1,
+        "TC": 11.6,
+        "TG": 4.1,
+        "TT": 0.5,
+    },
+    "AT/GC": {
+        "AA": 5.0,
+        "AC": 3.9,
+        "AG": -6.3,
+        "AT": 3.9,
+        "CA": 5.3,
+        "CC": 2.6,
+        "CG": 5.3,
+        "CT": -4.9,
+        "GA": -2.2,
+        "GC": 3.9,
+        "GG": -9.9,
+        "GT": 3.9,
+        "TA": 5.3,
+        "TC": -12.3,
+        "TG": 5.3,
+        "TT": -7.5,
+    },
+    "AT/GT": {
+        "AA": 5.0,
+        "AC": 3.9,
+        "AG": -6.3,
+        "AT": 3.9,
+        "CA": 5.3,
+        "CC": 2.6,
+        "CG": 5.3,
+        "CT": -4.9,
+        "GA": -2.2,
+        "GC": 3.9,
+        "GG": -9.9,
+        "GT": 3.9,
+        "TA": 5.3,
+        "TC": -12.3,
+        "TG": 5.3,
+        "TT": -7.5,
+    },
+    "AT/TA": {
+        "AA": 4.9,
+        "AC": 9.8,
+        "AG": 7.1,
+        "AT": 9.8,
+        "CA": 9.8,
+        "CC": 7.5,
+        "CG": 9.8,
+        "CT": 4.3,
+        "GA": 7.1,
+        "GC": 9.8,
+        "GG": 4.1,
+        "GT": 9.8,
+        "TA": 9.8,
+        "TC": 4.3,
+        "TG": 9.8,
+        "TT": 5.7,
+    },
+    "AT/TG": {
+        "AA": 10.0,
+        "AC": 10.9,
+        "AG": 8.9,
+        "AT": 10.9,
+        "CA": 4.1,
+        "CC": 12.8,
+        "CG": 4.1,
+        "CT": 1.3,
+        "GA": 4.5,
+        "GC": 10.9,
+        "GG": -5.0,
+        "GT": 10.9,
+        "TA": 4.1,
+        "TC": 11.6,
+        "TG": 4.1,
+        "TT": 0.5,
+    },
+    "CG/AT": {
+        "AA": 10.0,
+        "AC": 13.2,
+        "AG": 11.3,
+        "AT": 13.2,
+        "CA": 9.6,
+        "CC": 5.9,
+        "CG": 9.6,
+        "CT": 0.1,
+        "GA": 6.9,
+        "GC": 13.2,
+        "GG": -1.1,
+        "GT": 13.2,
+        "TA": 9.6,
+        "TC": 3.0,
+        "TG": 9.6,
+        "TT": 0.7,
+    },
+    "CG/CG": {
+        "AA": -0.6,
+        "AC": 4.6,
+        "AG": 1.3,
+        "AT": 4.6,
+        "CA": 9.3,
+        "CC": 7.5,
+        "CG": 9.3,
+        "CT": 1.9,
+        "GA": 3.9,
+        "GC": 4.6,
+        "GG": -0.9,
+        "GT": 4.6,
+        "TA": 9.3,
+        "TC": 0.5,
+        "TG": 9.3,
+        "TT": 2.1,
+    },
+    "CG/GC": {
+        "AA": 4.0,
+        "AC": 5.1,
+        "AG": 6.1,
+        "AT": 5.1,
+        "CA": 5.1,
+        "CC": 4.1,
+        "CG": 5.1,
+        "CT": 1.6,
+        "GA": 6.1,
+        "GC": 5.1,
+        "GG": 0.1,
+        "GT": 5.1,
+        "TA": 5.1,
+        "TC": 1.6,
+        "TG": 5.1,
+        "TT": -2.7,
+    },
+    "CG/GT": {
+        "AA": 4.0,
+        "AC": 5.1,
+        "AG": 6.1,
+        "AT": 5.1,
+        "CA": 5.1,
+        "CC": 4.1,
+        "CG": 5.1,
+        "CT": 1.6,
+        "GA": 6.1,
+        "GC": 5.1,
+        "GG": 0.1,
+        "GT": 5.1,
+        "TA": 5.1,
+        "TC": 1.6,
+        "TG": 5.1,
+        "TT": -2.7,
+    },
+    "CG/TA": {
+        "AA": 5.0,
+        "AC": 5.3,
+        "AG": -2.2,
+        "AT": 5.3,
+        "CA": 3.9,
+        "CC": 2.6,
+        "CG": 3.9,
+        "CT": -12.3,
+        "GA": -6.3,
+        "GC": 5.3,
+        "GG": -9.9,
+        "GT": 5.3,
+        "TA": 3.9,
+        "TC": -4.9,
+        "TG": 3.9,
+        "TT": -7.5,
+    },
+    "CG/TG": {
+        "AA": -0.6,
+        "AC": 4.6,
+        "AG": 1.3,
+        "AT": 4.6,
+        "CA": 9.3,
+        "CC": 7.5,
+        "CG": 9.3,
+        "CT": 1.9,
+        "GA": 3.9,
+        "GC": 4.6,
+        "GG": -0.9,
+        "GT": 4.6,
+        "TA": 9.3,
+        "TC": 0.5,
+        "TG": 9.3,
+        "TT": 2.1,
+    },
+    "GC/AT": {
+        "AA": -1.4,
+        "AC": 13.2,
+        "AG": 11.3,
+        "AT": 13.2,
+        "CA": 4.2,
+        "CC": 12.9,
+        "CG": 4.2,
+        "CT": -0.4,
+        "GA": 6.9,
+        "GC": 13.2,
+        "GG": 3.4,
+        "GT": 13.2,
+        "TA": 4.2,
+        "TC": 3.7,
+        "TG": 4.2,
+        "TT": -10.0,
+    },
+    "GC/CG": {
+        "AA": 2.6,
+        "AC": 3.9,
+        "AG": 2.4,
+        "AT": 3.9,
+        "CA": 3.9,
+        "CC": 6.0,
+        "CG": 3.9,
+        "CT": -0.6,
+        "GA": 2.4,
+        "GC": 3.9,
+        "GG": -2.8,
+        "GT": 3.9,
+        "TA": 3.9,
+        "TC": -0.6,
+        "TG": 3.9,
+        "TT": 0.3,
+    },
+    "GC/GC": {
+        "AA": -0.6,
+        "AC": 9.3,
+        "AG": 3.9,
+        "AT": 9.3,
+        "CA": 4.6,
+        "CC": 7.5,
+        "CG": 4.6,
+        "CT": 0.5,
+        "GA": 1.3,
+        "GC": 9.3,
+        "GG": -0.9,
+        "GT": 9.3,
+        "TA": 4.6,
+        "TC": 1.9,
+        "TG": 4.6,
+        "TT": 2.1,
+    },
+    "GC/GT": {
+        "AA": -0.6,
+        "AC": 9.3,
+        "AG": 3.9,
+        "AT": 9.3,
+        "CA": 4.6,
+        "CC": 7.5,
+        "CG": 4.6,
+        "CT": 0.5,
+        "GA": 1.3,
+        "GC": 9.3,
+        "GG": -0.9,
+        "GT": 9.3,
+        "TA": 4.6,
+        "TC": 1.9,
+        "TG": 4.6,
+        "TT": 2.1,
+    },
+    "GC/TA": {
+        "AA": 10.0,
+        "AC": 4.1,
+        "AG": 4.5,
+        "AT": 4.1,
+        "CA": 10.9,
+        "CC": 12.8,
+        "CG": 10.9,
+        "CT": 11.6,
+        "GA": 8.9,
+        "GC": 4.1,
+        "GG": -5.0,
+        "GT": 4.1,
+        "TA": 10.9,
+        "TC": 1.3,
+        "TG": 10.9,
+        "TT": 0.5,
+    },
+    "GC/TG": {
+        "AA": 2.6,
+        "AC": 3.9,
+        "AG": 2.4,
+        "AT": 3.9,
+        "CA": 3.9,
+        "CC": 6.0,
+        "CG": 3.9,
+        "CT": -0.6,
+        "GA": 2.4,
+        "GC": 3.9,
+        "GG": -2.8,
+        "GT": 3.9,
+        "TA": 3.9,
+        "TC": -0.6,
+        "TG": 3.9,
+        "TT": 0.3,
+    },
+    "GT/AT": {
+        "AA": -1.4,
+        "AC": 13.2,
+        "AG": 11.3,
+        "AT": 13.2,
+        "CA": 4.2,
+        "CC": 12.9,
+        "CG": 4.2,
+        "CT": -0.4,
+        "GA": 6.9,
+        "GC": 13.2,
+        "GG": 3.4,
+        "GT": 13.2,
+        "TA": 4.2,
+        "TC": 3.7,
+        "TG": 4.2,
+        "TT": -10.0,
+    },
+    "GT/CG": {
+        "AA": 2.6,
+        "AC": 3.9,
+        "AG": 2.4,
+        "AT": 3.9,
+        "CA": 3.9,
+        "CC": 6.0,
+        "CG": 3.9,
+        "CT": -0.6,
+        "GA": 2.4,
+        "GC": 3.9,
+        "GG": -2.8,
+        "GT": 3.9,
+        "TA": 3.9,
+        "TC": -0.6,
+        "TG": 3.9,
+        "TT": 0.3,
+    },
+    "GT/GC": {
+        "AA": -0.6,
+        "AC": 9.3,
+        "AG": 3.9,
+        "AT": 9.3,
+        "CA": 4.6,
+        "CC": 7.5,
+        "CG": 4.6,
+        "CT": 0.5,
+        "GA": 1.3,
+        "GC": 9.3,
+        "GG": -0.9,
+        "GT": 9.3,
+        "TA": 4.6,
+        "TC": 1.9,
+        "TG": 4.6,
+        "TT": 2.1,
+    },
+    "GT/GT": {
+        "AA": -0.6,
+        "AC": 9.3,
+        "AG": 3.9,
+        "AT": 9.3,
+        "CA": 4.6,
+        "CC": 7.5,
+        "CG": 4.6,
+        "CT": 0.5,
+        "GA": 1.3,
+        "GC": 9.3,
+        "GG": -0.9,
+        "GT": 9.3,
+        "TA": 4.6,
+        "TC": 1.9,
+        "TG": 4.6,
+        "TT": 2.1,
+    },
+    "GT/TA": {
+        "AA": 10.0,
+        "AC": 4.1,
+        "AG": 4.5,
+        "AT": 4.1,
+        "CA": 10.9,
+        "CC": 12.8,
+        "CG": 10.9,
+        "CT": 11.6,
+        "GA": 8.9,
+        "GC": 4.1,
+        "GG": -5.0,
+        "GT": 4.1,
+        "TA": 10.9,
+        "TC": 1.3,
+        "TG": 10.9,
+        "TT": 0.5,
+    },
+    "GT/TG": {
+        "AA": 2.6,
+        "AC": 3.9,
+        "AG": 2.4,
+        "AT": 3.9,
+        "CA": 3.9,
+        "CC": 6.0,
+        "CG": 3.9,
+        "CT": -0.6,
+        "GA": 2.4,
+        "GC": 3.9,
+        "GG": -2.8,
+        "GT": 3.9,
+        "TA": 3.9,
+        "TC": -0.6,
+        "TG": 3.9,
+        "TT": 0.3,
+    },
+    "TA/AT": {
+        "AA": 12.1,
+        "AC": 14.3,
+        "AG": 11.9,
+        "AT": 14.3,
+        "CA": 14.3,
+        "CC": 17.4,
+        "CG": 14.3,
+        "CT": 2.5,
+        "GA": 11.9,
+        "GC": 14.3,
+        "GG": 8.4,
+        "GT": 14.3,
+        "TA": 14.3,
+        "TC": 2.5,
+        "TG": 14.3,
+        "TT": 6.2,
+    },
+    "TA/CG": {
+        "AA": -1.4,
+        "AC": 4.2,
+        "AG": 6.9,
+        "AT": 4.2,
+        "CA": 13.2,
+        "CC": 12.9,
+        "CG": 13.2,
+        "CT": 3.7,
+        "GA": 11.3,
+        "GC": 4.2,
+        "GG": 3.4,
+        "GT": 4.2,
+        "TA": 13.2,
+        "TC": -0.4,
+        "TG": 13.2,
+        "TT": -10.0,
+    },
+    "TA/GC": {
+        "AA": 10.0,
+        "AC": 9.6,
+        "AG": 6.9,
+        "AT": 9.6,
+        "CA": 13.2,
+        "CC": 5.9,
+        "CG": 13.2,
+        "CT": 3.0,
+        "GA": 11.3,
+        "GC": 9.6,
+        "GG": -1.1,
+        "GT": 9.6,
+        "TA": 13.2,
+        "TC": 0.1,
+        "TG": 13.2,
+        "TT": 0.7,
+    },
+    "TA/GT": {
+        "AA": 10.0,
+        "AC": 9.6,
+        "AG": 6.9,
+        "AT": 9.6,
+        "CA": 13.2,
+        "CC": 5.9,
+        "CG": 13.2,
+        "CT": 3.0,
+        "GA": 11.3,
+        "GC": 9.6,
+        "GG": -1.1,
+        "GT": 9.6,
+        "TA": 13.2,
+        "TC": 0.1,
+        "TG": 13.2,
+        "TT": 0.7,
+    },
+    "TA/TA": {
+        "AA": 12.9,
+        "AC": 10.4,
+        "AG": 1.8,
+        "AT": 10.4,
+        "CA": 1.5,
+        "CC": 14.7,
+        "CG": 1.5,
+        "CT": 3.5,
+        "GA": 10.7,
+        "GC": 10.4,
+        "GG": 1.6,
+        "GT": 10.4,
+        "TA": 1.5,
+        "TC": -1.6,
+        "TG": 1.5,
+        "TT": -4.8,
+    },
+    "TA/TG": {
+        "AA": -1.4,
+        "AC": 4.2,
+        "AG": 6.9,
+        "AT": 4.2,
+        "CA": 13.2,
+        "CC": 12.9,
+        "CG": 13.2,
+        "CT": 3.7,
+        "GA": 11.3,
+        "GC": 4.2,
+        "GG": 3.4,
+        "GT": 4.2,
+        "TA": 13.2,
+        "TC": -0.4,
+        "TG": 13.2,
+        "TT": -10.0,
+    },
+    "TG/AT": {
+        "AA": 10.0,
+        "AC": 13.2,
+        "AG": 11.3,
+        "AT": 13.2,
+        "CA": 9.6,
+        "CC": 5.9,
+        "CG": 9.6,
+        "CT": 0.1,
+        "GA": 6.9,
+        "GC": 13.2,
+        "GG": -1.1,
+        "GT": 13.2,
+        "TA": 9.6,
+        "TC": 3.0,
+        "TG": 9.6,
+        "TT": 0.7,
+    },
+    "TG/CG": {
+        "AA": -0.6,
+        "AC": 4.6,
+        "AG": 1.3,
+        "AT": 4.6,
+        "CA": 9.3,
+        "CC": 7.5,
+        "CG": 9.3,
+        "CT": 1.9,
+        "GA": 3.9,
+        "GC": 4.6,
+        "GG": -0.9,
+        "GT": 4.6,
+        "TA": 9.3,
+        "TC": 0.5,
+        "TG": 9.3,
+        "TT": 2.1,
+    },
+    "TG/GC": {
+        "AA": 4.0,
+        "AC": 5.1,
+        "AG": 6.1,
+        "AT": 5.1,
+        "CA": 5.1,
+        "CC": 4.1,
+        "CG": 5.1,
+        "CT": 1.6,
+        "GA": 6.1,
+        "GC": 5.1,
+        "GG": 0.1,
+        "GT": 5.1,
+        "TA": 5.1,
+        "TC": 1.6,
+        "TG": 5.1,
+        "TT": -2.7,
+    },
+    "TG/GT": {
+        "AA": 4.0,
+        "AC": 5.1,
+        "AG": 6.1,
+        "AT": 5.1,
+        "CA": 5.1,
+        "CC": 4.1,
+        "CG": 5.1,
+        "CT": 1.6,
+        "GA": 6.1,
+        "GC": 5.1,
+        "GG": 0.1,
+        "GT": 5.1,
+        "TA": 5.1,
+        "TC": 1.6,
+        "TG": 5.1,
+        "TT": -2.7,
+    },
+    "TG/TA": {
+        "AA": 5.0,
+        "AC": 5.3,
+        "AG": -2.2,
+        "AT": 5.3,
+        "CA": 3.9,
+        "CC": 2.6,
+        "CG": 3.9,
+        "CT": -12.3,
+        "GA": -6.3,
+        "GC": 5.3,
+        "GG": -9.9,
+        "GT": 5.3,
+        "TA": 3.9,
+        "TC": -4.9,
+        "TG": 3.9,
+        "TT": -7.5,
+    },
+    "TG/TG": {
+        "AA": -0.6,
+        "AC": 4.6,
+        "AG": 1.3,
+        "AT": 4.6,
+        "CA": 9.3,
+        "CC": 7.5,
+        "CG": 9.3,
+        "CT": 1.9,
+        "GA": 3.9,
+        "GC": 4.6,
+        "GG": -0.9,
+        "GT": 4.6,
+        "TA": 9.3,
+        "TC": 0.5,
+        "TG": 9.3,
+        "TT": 2.1,
+    },
+}
+
+_TERMINAL_MISMATCH_DG37: dict[str, dict[str, float | None]] = {
+    "AT": {
+        "AA": -0.7,
+        "AC": -0.3,
+        "AG": -0.5,
+        "AT": 0.0,
+        "CA": -0.6,
+        "CC": -0.2,
+        "CG": 0.0,
+        "CT": -0.3,
+        "GA": -0.6,
+        "GC": 0.0,
+        "GG": -0.4,
+        "GT": -0.5,
+        "TA": 0.0,
+        "TC": -0.3,
+        "TG": -0.5,
+        "TT": -0.4,
+    },
+    "CG": {
+        "AA": -1.0,
+        "AC": -0.8,
+        "AG": -0.9,
+        "AT": 0.0,
+        "CA": -0.8,
+        "CC": -0.5,
+        "CG": 0.0,
+        "CT": -0.7,
+        "GA": -1.0,
+        "GC": 0.0,
+        "GG": -0.9,
+        "GT": -1.0,
+        "TA": 0.0,
+        "TC": -0.6,
+        "TG": -0.9,
+        "TT": -0.9,
+    },
+    "GC": {
+        "AA": -1.0,
+        "AC": -0.7,
+        "AG": -0.8,
+        "AT": 0.0,
+        "CA": -1.0,
+        "CC": -0.6,
+        "CG": 0.0,
+        "CT": -0.7,
+        "GA": -1.0,
+        "GC": 0.0,
+        "GG": -1.0,
+        "GT": -0.8,
+        "TA": 0.0,
+        "TC": -0.6,
+        "TG": -0.9,
+        "TT": -0.9,
+    },
+    "GT": {
+        "AA": -0.5,
+        "AC": -0.2,
+        "AG": -0.5,
+        "AT": -0.6,
+        "CA": -0.2,
+        "CC": -0.2,
+        "CG": -0.9,
+        "CT": -0.2,
+        "GA": -0.5,
+        "GC": -0.9,
+        "GG": -0.5,
+        "GT": -0.5,
+        "TA": -0.5,
+        "TC": -0.2,
+        "TG": -0.5,
+        "TT": -0.2,
+    },
+    "TA": {
+        "AA": -0.6,
+        "AC": -0.4,
+        "AG": -0.5,
+        "AT": 0.0,
+        "CA": -0.5,
+        "CC": -0.2,
+        "CG": 0.0,
+        "CT": -0.5,
+        "GA": -0.6,
+        "GC": -0.0,
+        "GG": -0.4,
+        "GT": -0.5,
+        "TA": 0.0,
+        "TC": -0.3,
+        "TG": -0.6,
+        "TT": -0.3,
+    },
+    "TG": {
+        "AA": -0.5,
+        "AC": -0.2,
+        "AG": -0.5,
+        "AT": -0.5,
+        "CA": -0.2,
+        "CC": -0.2,
+        "CG": -0.8,
+        "CT": -0.2,
+        "GA": -0.5,
+        "GC": -1.0,
+        "GG": -0.5,
+        "GT": -0.5,
+        "TA": -0.5,
+        "TC": -0.2,
+        "TG": -0.5,
+        "TT": -0.2,
+    },
+}
+
+_TERMINAL_MISMATCH_DH: dict[str, dict[str, float | None]] = {
+    "AT": {
+        "AA": 4.0,
+        "AC": 5.2,
+        "AG": 4.7,
+        "AT": 4.3,
+        "CA": 4.0,
+        "CC": 5.2,
+        "CG": 4.7,
+        "CT": 4.3,
+        "GA": 4.0,
+        "GC": 5.2,
+        "GG": 4.7,
+        "GT": 4.3,
+        "TA": 4.0,
+        "TC": 5.2,
+        "TG": 4.7,
+        "TT": 4.3,
+    },
+    "CG": {
+        "AA": -4.6,
+        "AC": -4.2,
+        "AG": -4.7,
+        "AT": -5.0,
+        "CA": -4.6,
+        "CC": -4.2,
+        "CG": -4.7,
+        "CT": -5.0,
+        "GA": -4.6,
+        "GC": -4.2,
+        "GG": -4.7,
+        "GT": -5.0,
+        "TA": -4.6,
+        "TC": -4.2,
+        "TG": -4.7,
+        "TT": -5.0,
+    },
+    "GC": {
+        "AA": -6.2,
+        "AC": -3.3,
+        "AG": -5.1,
+        "AT": -0.9,
+        "CA": -6.2,
+        "CC": -3.3,
+        "CG": -5.1,
+        "CT": -0.9,
+        "GA": -6.2,
+        "GC": -3.3,
+        "GG": -5.1,
+        "GT": -0.9,
+        "TA": -6.2,
+        "TC": -3.3,
+        "TG": -5.1,
+        "TT": -0.9,
+    },
+    "GT": {
+        "AA": -3.0,
+        "AC": -0.1,
+        "AG": -1.9,
+        "AT": 2.3,
+        "CA": -3.0,
+        "CC": -0.1,
+        "CG": -1.9,
+        "CT": 2.3,
+        "GA": -3.0,
+        "GC": -0.1,
+        "GG": -1.9,
+        "GT": 2.3,
+        "TA": -3.0,
+        "TC": -0.1,
+        "TG": -1.9,
+        "TT": 2.3,
+    },
+    "TA": {
+        "AA": 2.3,
+        "AC": 1.7,
+        "AG": 0.7,
+        "AT": -5.8,
+        "CA": 2.3,
+        "CC": 1.7,
+        "CG": 0.7,
+        "CT": -5.8,
+        "GA": 2.3,
+        "GC": 1.7,
+        "GG": 0.7,
+        "GT": -5.8,
+        "TA": 2.3,
+        "TC": 1.7,
+        "TG": 0.7,
+        "TT": -5.8,
+    },
+    "TG": {
+        "AA": 2.3,
+        "AC": 1.7,
+        "AG": 0.7,
+        "AT": -5.8,
+        "CA": 2.3,
+        "CC": 1.7,
+        "CG": 0.7,
+        "CT": -5.8,
+        "GA": 2.3,
+        "GC": 1.7,
+        "GG": 0.7,
+        "GT": -5.8,
+        "TA": 2.3,
+        "TC": 1.7,
+        "TG": 0.7,
+        "TT": -5.8,
+    },
+}
+
+_DANGLE_DG37: dict[str, dict[str, float | None]] = {
+    "AT|bottom_5p": {"A": -0.5, "C": -0.2, "G": -0.5, "T": -0.3},
+    "AT|top_3p": {"A": -0.2, "C": -0.2, "G": -0.2, "T": -0.2},
+    "CG|bottom_5p": {"A": -0.8, "C": -0.5, "G": -0.8, "T": -0.7},
+    "CG|top_3p": {"A": -1.1, "C": -0.4, "G": -1.1, "T": -0.8},
+    "GC|bottom_5p": {"A": -0.9, "C": -0.5, "G": -0.7, "T": -0.6},
+    "GC|top_3p": {"A": -0.4, "C": -0.2, "G": -0.4, "T": -0.3},
+    "GT|bottom_5p": {"A": -0.1, "C": -0.1, "G": -0.1, "T": -0.1},
+    "GT|top_3p": {"A": -0.2, "C": -0.2, "G": -0.2, "T": -0.2},
+    "TA|bottom_5p": {"A": -0.5, "C": -0.2, "G": -0.6, "T": -0.3},
+    "TA|top_3p": {"A": -0.2, "C": -0.2, "G": -0.2, "T": -0.2},
+    "TG|bottom_5p": {"A": -0.1, "C": -0.1, "G": -0.1, "T": -0.1},
+    "TG|top_3p": {"A": -0.2, "C": -0.2, "G": -0.2, "T": -0.2},
+}
+
+_DANGLE_DH: dict[str, dict[str, float | None]] = {
+    "AT|bottom_5p": {"A": 0.8, "C": 2.0, "G": 1.5, "T": 1.1},
+    "AT|top_3p": {"A": 4.3, "C": 6.3, "G": 2.5, "T": 2.6},
+    "CG|bottom_5p": {"A": -4.6, "C": -4.2, "G": -4.7, "T": -5.0},
+    "CG|top_3p": {"A": -8.0, "C": -2.5, "G": -3.1, "T": -3.9},
+    "GC|bottom_5p": {"A": -6.2, "C": -3.3, "G": -5.1, "T": -0.9},
+    "GC|top_3p": {"A": -1.9, "C": -0.2, "G": -4.0, "T": -5.5},
+    "GT|bottom_5p": {"A": -6.2, "C": -3.3, "G": -5.1, "T": -0.9},
+    "GT|top_3p": {"A": -1.9, "C": -0.2, "G": -4.0, "T": -5.5},
+    "TA|bottom_5p": {"A": -0.9, "C": -0.6, "G": -2.5, "T": -9.0},
+    "TA|top_3p": {"A": -5.3, "C": 2.0, "G": -4.8, "T": 0.9},
+    "TG|bottom_5p": {"A": -4.6, "C": -4.2, "G": -4.7, "T": -5.0},
+    "TG|top_3p": {"A": -8.0, "C": -2.5, "G": -3.1, "T": -3.9},
+}
+
 
 def _get_nn_params(rna: bool = False, hybrid: bool = False) -> dict[str, tuple[float, float]]:
     """Return the appropriate NN parameter table.
@@ -1000,6 +2588,411 @@ def calculate_duplex_dg(
         raise ThermodynamicsError(
             f"Unknown duplex method: {method}. Use 'nearest_neighbor' or 'rnaduplex'."
         )
+
+
+# ---------------------------------------------------------------------------
+# Defective-duplex thermodynamics (single mismatch / dangling end)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DefectDuplexResult:
+    """Thermodynamics of an ASO duplexed with an imperfect target site.
+
+    Attributes
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA alphabet, 5'→3').
+    target_site : str
+        Target-site sequence exactly as evaluated (DNA alphabet).
+    dh : float
+        Duplex ΔH in kcal/mol.
+    ds : float
+        Duplex ΔS in cal/(mol·K).
+    dg : float
+        Duplex ΔG in kcal/mol at ``temperature``.
+    defect : str
+        One of "none", "internal_mismatch", "terminal_mismatch",
+        "dangling_end".
+    aso_position : int
+        0-based ASO index of the defect (mismatched pair, or the paired
+        position the dangling base stacks onto); −1 when defect is "none".
+    target_position : int
+        0-based index into ``target_site`` of the defect; −1 when "none".
+    detail : str
+        Human-readable description of the defect and parameters used.
+    """
+
+    aso_sequence: str
+    target_site: str
+    dh: float
+    ds: float
+    dg: float
+    defect: str
+    aso_position: int
+    target_position: int
+    detail: str
+
+
+# Closing base pairs allowed by the defect tables: the four Watson-Crick
+# pairs plus the two G·T wobble orientations (bottom base written second).
+_DNA_CLOSURES: frozenset[tuple[str, str]] = frozenset(
+    {("A", "T"), ("C", "G"), ("G", "C"), ("T", "A"), ("G", "T"), ("T", "G")}
+)
+
+
+def _combine_defect_tables(
+    dg_table: dict[str, dict[str, float | None]],
+    dh_table: dict[str, dict[str, float | None]],
+) -> dict[str, dict[str, tuple[float, float]]]:
+    """Combine published (ΔG°37, ΔH) defect tables into (ΔH, ΔS) tables.
+
+    ΔS is derived from the published pair via the Gibbs relation
+    ΔS = (ΔH − ΔG°37) × 1000 / 310.15, the same convention used for the
+    DNA/RNA/hybrid NN tables above. Disallowed motifs ("." in the source
+    tables, stored as None) are dropped; lookups of missing motifs raise
+    :class:`ThermodynamicsError`.
+    """
+    combined: dict[str, dict[str, tuple[float, float]]] = {}
+    for block, grid_dg in dg_table.items():
+        grid_dh = dh_table[block]
+        entries: dict[str, tuple[float, float]] = {}
+        for motif, dg in grid_dg.items():
+            dh = grid_dh[motif]
+            if dg is None or dh is None:
+                continue
+            entries[motif] = (dh, (dh - dg) * 1000.0 / 310.15)
+        combined[block] = entries
+    return combined
+
+
+_INT11_PARAMS = _combine_defect_tables(_INT11_DG37, _INT11_DH)
+_TERMINAL_MISMATCH_PARAMS = _combine_defect_tables(_TERMINAL_MISMATCH_DG37, _TERMINAL_MISMATCH_DH)
+_DANGLE_PARAMS = _combine_defect_tables(_DANGLE_DG37, _DANGLE_DH)
+
+
+def _nn_duplex_params(top: str) -> tuple[float, float]:
+    """(ΔH, ΔS) of a perfectly paired DNA duplex region (SantaLucia 1998).
+
+    Sums the stacking terms over the top-strand sequence plus the
+    per-terminal initiation corrections at the region's own two ends.
+    No symmetry correction: this helper is used for baselines of
+    defective duplexes, which are never self-complementary.
+    """
+    total_h = 0.0
+    total_s = 0.0
+    for i in range(len(top) - 1):
+        h, s = _DNA_NN[top[i : i + 2]]
+        total_h += h
+        total_s += s
+    for base in (top[0], top[-1]):
+        h, s = _DNA_INIT_GC if base in ("G", "C") else _DNA_INIT_AT
+        total_h += h
+        total_s += s
+    return total_h, total_s
+
+
+def _lookup_defect(
+    table: dict[str, dict[str, tuple[float, float]]],
+    block: str,
+    motif: str,
+    description: str,
+) -> tuple[float, float]:
+    """Look up a (ΔH, ΔS) defect entry, raising on disallowed motifs."""
+    try:
+        return table[block][motif]
+    except KeyError:
+        raise ThermodynamicsError(
+            f"Defect motif not tabulated ({description}): block {block}, motif {motif}"
+        ) from None
+
+
+def calculate_defect_duplex(
+    aso_sequence: str,
+    target_site: str,
+    temperature: float = DEFAULT_TEMPERATURE_C,
+) -> DefectDuplexResult:
+    """Thermodynamics of an ASO duplexed with a (possibly imperfect) target.
+
+    Models an ASO (top strand, DNA, 5'→3') bound to a target site using
+    the SantaLucia 1998 DNA/DNA NN model extended with the NNDB defect
+    tables (see the defect-parameter section above). The pairing
+    convention matches :mod:`aso_designer.off_target`: the ASO binds the
+    reverse complement of ``target_site``, i.e. ``aso[i]`` pairs with
+    ``target_site[n - 1 - i]`` (antiparallel, complementary pairing).
+
+    Exactly one defect is supported:
+
+    - ``target_site`` same length as the ASO with zero mismatches: the
+      perfect duplex (equivalent to :func:`calculate_dg`).
+    - one internal mismatch: a 1×1 internal loop. Requires Watson-Crick
+      or G·T-wobble pairs on both flanking sides (the tabulated
+      closures). The tabulated 1×1 value replaces the two flanking
+      stacks.
+    - one terminal mismatch (at either end): the tabulated terminal-
+      mismatch value replaces the terminal stack, added to the WC helix
+      of the remaining pairs (NNDB composition; verified against the
+      RNA worked examples, which the repo's RNA model reproduces
+      exactly).
+    - ``target_site`` longer by exactly one base: a single dangling
+      nucleotide on the target strand. The aligned region must pair
+      perfectly. The dangling value adds to the paired-region helix;
+      5'-side overhangs use the bottom-5' table directly, 3'-side
+      overhangs are evaluated in the rotated (strand-swapped) frame
+      with the top-3' table, which is exact for this parameter set.
+
+    Duplexes with more than one defect (two mismatches, mismatch
+    adjacent to a dangle, mismatch next to a non-tabulated closing
+    pair, overhangs on both strands) are outside the tabulated NN
+    domain and raise :class:`ThermodynamicsError`.
+
+    Parameters
+    ----------
+    aso_sequence : str
+        ASO sequence (DNA alphabet, 5'→3'). U is converted to T.
+    target_site : str
+        Target-site sequence, 5'→3', of length equal to the ASO
+        (mismatch case) or longer by one base (dangling-end case).
+        U is converted to T.
+    temperature : float
+        Temperature in °C for ΔG (default 37 °C).
+
+    Returns
+    -------
+    DefectDuplexResult
+
+    Raises
+    ------
+    ThermodynamicsError
+        On invalid input, unsupported defect geometry, or motifs
+        missing from the published tables.
+    """
+    aso = aso_sequence.upper().replace("U", "T")
+    site = target_site.upper().replace("U", "T")
+    for label, seq in (("ASO", aso), ("target site", site)):
+        invalid = sorted(set(seq) - set("ACGT"))
+        if invalid:
+            raise ThermodynamicsError(f"Invalid base(s) {invalid} in {label} sequence: {seq}")
+
+    n = len(aso)
+    m = len(site)
+    if n < 3:
+        raise ThermodynamicsError(f"ASO too short for defect-duplex modeling: {n} nt (< 3)")
+    if m not in (n, n + 1):
+        raise ThermodynamicsError(
+            f"Target site length {m} must equal the ASO length {n} "
+            f"(mismatch) or exceed it by one base (dangling end): "
+            f"{aso} vs {site}"
+        )
+
+    comp_map = str.maketrans("ACGT", "TGCA")
+    revcomp_aso = aso.translate(comp_map)[::-1]
+
+    def dg_at(dh: float, ds: float) -> float:
+        return dh - (273.15 + temperature) * ds / 1000.0
+
+    def finish(
+        defect: str,
+        aso_pos: int,
+        target_pos: int,
+        dh: float,
+        ds: float,
+        detail: str,
+    ) -> DefectDuplexResult:
+        return DefectDuplexResult(
+            aso_sequence=aso,
+            target_site=site,
+            dh=dh,
+            ds=ds,
+            dg=dg_at(dh, ds),
+            defect=defect,
+            aso_position=aso_pos,
+            target_position=target_pos,
+            detail=detail,
+        )
+
+    if m == n:
+        if site == revcomp_aso:
+            dh, ds = calculate_nn_thermodynamics(aso)
+            return finish(
+                "none",
+                -1,
+                -1,
+                dh,
+                ds,
+                "perfectly paired duplex (SantaLucia 1998 NN model)",
+            )
+
+        # under[i] = target-site base paired opposite aso[i] (bottom strand
+        # read 3'→5' under the top strand). A position pairs (Watson-Crick
+        # or G·T wobble) iff the pair is in the tabulated closure set.
+        under = [site[n - 1 - i] for i in range(n)]
+        mismatches = [i for i in range(n) if (aso[i], under[i]) not in _DNA_CLOSURES]
+        if not mismatches:
+            # Paired throughout via WC pairs and/or G·T wobbles (the site
+            # need not be the strict reverse complement). Stacking and
+            # initiation depend only on the top strand, so the energetics
+            # equal the perfect duplex; the symmetry correction is skipped
+            # because a duplex containing wobble pairs is never
+            # self-complementary.
+            dh, ds = _nn_duplex_params(aso)
+            return finish(
+                "none",
+                -1,
+                -1,
+                dh,
+                ds,
+                "paired duplex with Watson-Crick and/or G·T wobble pairs "
+                "(SantaLucia 1998 NN model)",
+            )
+        if len(mismatches) > 1:
+            raise ThermodynamicsError(
+                f"Unsupported duplex with {len(mismatches)} mismatches "
+                f"(at most one is tabulated): {aso} vs {site}"
+            )
+
+        i = mismatches[0]
+        top_base, bottom_base = aso[i], under[i]
+
+        if 0 < i < n - 1:
+            # 1x1 internal loop: requires tabulated (WC/wobble) flanking
+            # closures; the tabulated value replaces the two flanking stacks.
+            left = (aso[i - 1], under[i - 1])
+            right = (aso[i + 1], under[i + 1])
+            for side, closure in (("left", left), ("right", right)):
+                if closure not in _DNA_CLOSURES:
+                    raise ThermodynamicsError(
+                        f"Unsupported internal mismatch at ASO position {i}: "
+                        f"{side} flanking pair {closure[0]}·{closure[1]} is not "
+                        f"a Watson-Crick or G·T-wobble pair"
+                    )
+            block = f"{left[0]}{left[1]}/{right[0]}{right[1]}"
+            motif = f"{top_base}{bottom_base}"
+            dh_defect, ds_defect = _lookup_defect(_INT11_PARAMS, block, motif, "1x1 internal loop")
+            h1, s1 = _DNA_NN[aso[i - 1 : i + 1]]
+            h2, s2 = _DNA_NN[aso[i : i + 2]]
+            base_h, base_s = _nn_duplex_params(aso)
+            dh = base_h - h1 - h2 + dh_defect
+            ds = base_s - s1 - s2 + ds_defect
+            return finish(
+                "internal_mismatch",
+                i,
+                n - 1 - i,
+                dh,
+                ds,
+                f"1x1 internal mismatch {top_base}·{bottom_base} at ASO "
+                f"position {i} between closures {block} "
+                f"(ΔG°37 {dh_defect - 310.15 * ds_defect / 1000.0:+.2f} "
+                f"kcal/mol replacing two stacks)",
+            )
+
+        if i == n - 1:
+            # 3'-terminal mismatch: WC helix through the penultimate pair +
+            # the tabulated terminal-mismatch value (replaces the terminal
+            # stack).
+            closing = (aso[n - 2], under[n - 2])
+            if closing not in _DNA_CLOSURES:
+                raise ThermodynamicsError(
+                    f"Unsupported terminal mismatch at ASO position {i}: "
+                    f"penultimate pair {closing[0]}·{closing[1]} is not a "
+                    f"Watson-Crick or G·T-wobble pair"
+                )
+            dh_base, ds_base = _nn_duplex_params(aso[: n - 1])
+            dh_defect, ds_defect = _lookup_defect(
+                _TERMINAL_MISMATCH_PARAMS,
+                f"{closing[0]}{closing[1]}",
+                f"{top_base}{bottom_base}",
+                "terminal mismatch",
+            )
+            return finish(
+                "terminal_mismatch",
+                i,
+                n - 1 - i,
+                dh_base + dh_defect,
+                ds_base + ds_defect,
+                f"3'-terminal mismatch {top_base}·{bottom_base} adjacent to "
+                f"closing pair {closing[0]}·{closing[1]}",
+            )
+
+        # i == 0: 5'-terminal mismatch, evaluated in the rotated frame
+        # (strands swapped and reversed) where the mismatched base sits on
+        # the top strand at the 3' end, matching the table orientation.
+        closing = (under[1], aso[1])
+        if closing not in _DNA_CLOSURES:
+            raise ThermodynamicsError(
+                f"Unsupported terminal mismatch at ASO position {i}: "
+                f"penultimate pair {closing[0]}·{closing[1]} is not a "
+                f"Watson-Crick or G·T-wobble pair"
+            )
+        dh_base, ds_base = _nn_duplex_params(aso[1:])
+        dh_defect, ds_defect = _lookup_defect(
+            _TERMINAL_MISMATCH_PARAMS,
+            f"{closing[0]}{closing[1]}",
+            f"{under[0]}{aso[0]}",
+            "terminal mismatch",
+        )
+        return finish(
+            "terminal_mismatch",
+            0,
+            n - 1,
+            dh_base + dh_defect,
+            ds_base + ds_defect,
+            f"5'-terminal mismatch {top_base}·{bottom_base} adjacent to "
+            f"closing pair {aso[1]}·{under[1]} (evaluated on the rotated "
+            f"strand)",
+        )
+
+    # m == n + 1: single dangling nucleotide on the target strand. Exactly
+    # one alignment must pair via tabulated (Watson-Crick/wobble) closures.
+    five_prime = all((aso[i], site[n - i]) in _DNA_CLOSURES for i in range(n))
+    three_prime = all((aso[i], site[n - 1 - i]) in _DNA_CLOSURES for i in range(n))
+    if five_prime and three_prime:
+        raise ThermodynamicsError(
+            f"Ambiguous dangling-end alignment for {aso} vs {site}: the "
+            f"unpaired base could sit at either end; disambiguate the "
+            f"overhang side before calling"
+        )
+    if not five_prime and not three_prime:
+        raise ThermodynamicsError(
+            f"Dangling-end modeling requires the aligned region to pair "
+            f"throughout (Watson-Crick or G·T wobble): {aso} vs {site}"
+        )
+
+    if five_prime:
+        # The target's 5'-most base dangles beyond the ASO's 3' end:
+        # bottom-5' dangle, closing pair (aso[n-1], site[1]).
+        closing = f"{aso[n - 1]}{site[1]}"
+        dh_defect, ds_defect = _lookup_defect(
+            _DANGLE_PARAMS, f"{closing}|bottom_5p", site[0], "dangling end"
+        )
+        dh, ds = _nn_duplex_params(aso)
+        return finish(
+            "dangling_end",
+            n - 1,
+            0,
+            dh + dh_defect,
+            ds + ds_defect,
+            f"5' dangling {site[0]} on the target strand adjacent to "
+            f"closing pair {closing[0]}·{closing[1]}",
+        )
+
+    # The target's 3'-most base dangles beyond the ASO's 5' end: bottom-3'
+    # dangle, evaluated in the rotated frame as a top-3' dangle with
+    # closing pair (site[n-1], aso[0]).
+    closing = f"{site[n - 1]}{aso[0]}"
+    dh_defect, ds_defect = _lookup_defect(
+        _DANGLE_PARAMS, f"{closing}|top_3p", site[n], "dangling end"
+    )
+    dh, ds = _nn_duplex_params(aso)
+    return finish(
+        "dangling_end",
+        0,
+        n,
+        dh + dh_defect,
+        ds + ds_defect,
+        f"3' dangling {site[n]} on the target strand adjacent to closing "
+        f"pair {closing[0]}·{closing[1]} (evaluated on the rotated strand)",
+    )
 
 
 # ---------------------------------------------------------------------------

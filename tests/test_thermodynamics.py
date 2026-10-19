@@ -8,15 +8,26 @@ from pydantic import ValidationError
 
 from aso_designer.config_schema import ASOConfig
 from aso_designer.thermodynamics import (
+    _DANGLE_DG37,
+    _DANGLE_PARAMS,
+    _DNA_CLOSURES,
+    _DNA_NN,
     _HYBRID_INIT,
     _HYBRID_NN,
+    _INT11_DG37,
+    _INT11_DH,
+    _INT11_PARAMS,
     _RNA_NN,
+    _TERMINAL_MISMATCH_DG37,
+    _TERMINAL_MISMATCH_PARAMS,
     DuplexResult,
     R,
     SelfStructureResult,
     TargetStructureResult,
     ThermodynamicSummary,
     _is_self_complementary,
+    _nn_duplex_params,
+    calculate_defect_duplex,
     calculate_dg,
     calculate_duplex_dg,
     calculate_duplex_dg_nn,
@@ -949,3 +960,296 @@ class TestThermodynamicSummary:
             method="nearest_neighbor",
         )
         assert s.binding_class in ("strong", "moderate", "weak")
+
+
+# ---------------------------------------------------------------------------
+# Defective-duplex thermodynamics (mismatch / dangling-end NN terms)
+# ---------------------------------------------------------------------------
+
+
+def _dg37(dh: float, ds: float) -> float:
+    return dh - 310.15 * ds / 1000.0
+
+
+def _revcomp(seq: str) -> str:
+    return seq.translate(str.maketrans("ACGT", "TGCA"))[::-1]
+
+
+class TestDefectTables:
+    """The embedded NNDB defect tables must match the published values."""
+
+    def test_int11_table_shape(self):
+        """36 blocks (6x6 closure combinations), 16 entries each."""
+        assert len(_INT11_DG37) == 36
+        assert len(_INT11_DH) == 36
+        for block, grid in _INT11_DG37.items():
+            left, right = block.split("/")
+            assert (left[0], left[1]) in _DNA_CLOSURES
+            assert (right[0], right[1]) in _DNA_CLOSURES
+            assert len(grid) == 16
+            assert all(v is not None for v in grid.values())
+
+    def test_int11_matches_in_file_example(self):
+        """The AA block equals the commented example inside the NNDB file."""
+        grid = _INT11_DG37["AT/AT"]
+        assert grid["AA"] == 1.3
+        assert grid["CC"] == 2.4
+        assert grid["GG"] == 0.3
+        assert grid["TT"] == 1.4
+
+    def test_int11_wobble_closure_fallback_blocks(self):
+        """The four wobble-closed blocks carry the published uniform 3.0
+        kcal/mol dG fallback (dH retains fitted values)."""
+        for block in ("GT/GT", "GT/TG", "TG/GT", "TG/TG"):
+            assert all(v == 3.0 for v in _INT11_DG37[block].values())
+            assert all(v is not None for v in _INT11_DH[block].values())
+
+    def test_terminal_mismatch_published_example(self):
+        """NNDB worked example: 'TA followed by GA' is dG -0.6, dH +2.3."""
+        dh, ds = _TERMINAL_MISMATCH_PARAMS["TA"]["GA"]
+        assert dh == 2.3
+        assert round(_dg37(dh, ds), 6) == -0.6
+
+    def test_terminal_mismatch_table_shape(self):
+        """Six closing pairs (4 WC + 2 wobble), full 4x4 grids."""
+        assert set(_TERMINAL_MISMATCH_DG37) == {"AT", "CG", "GC", "GT", "TA", "TG"}
+        for grid in _TERMINAL_MISMATCH_DG37.values():
+            assert len(grid) == 16
+            assert all(v is not None for v in grid.values())
+
+    def test_dangle_published_values(self):
+        """NNDB dangle example values: 3' dangling C adjacent GC = -0.2
+        (dH -0.2); 5' dangling A adjacent CG = -0.8 dG / -4.6 dH."""
+        dh, ds = _DANGLE_PARAMS["GC|top_3p"]["C"]
+        assert dh == -0.2
+        assert round(_dg37(dh, ds), 6) == -0.2
+        dh_a, _ = _DANGLE_PARAMS["CG|bottom_5p"]["A"]
+        assert dh_a == -4.6
+        assert round(_dg37(dh_a, _DANGLE_PARAMS["CG|bottom_5p"]["A"][1]), 6) == -0.8
+
+    def test_dangle_table_shape(self):
+        """12 blocks (6 closures x 2 sides), one entry per dangling base."""
+        assert len(_DANGLE_DG37) == 12
+        assert {k.split("|")[1] for k in _DANGLE_DG37} == {"top_3p", "bottom_5p"}
+        for grid in _DANGLE_DG37.values():
+            assert set(grid) == {"A", "C", "G", "T"}
+            assert all(v is not None for v in grid.values())
+
+    def test_combined_params_cover_raw_tables(self):
+        """Every tabulated (non-None) motif appears in the (dH, dS) tables."""
+        for block, grid in _INT11_DG37.items():
+            for motif in grid:
+                assert motif in _INT11_PARAMS[block]
+        for block, grid in _DANGLE_DG37.items():
+            for base in grid:
+                assert base in _DANGLE_PARAMS[block]
+        # All derived entropies are finite
+        for table in (_INT11_PARAMS, _TERMINAL_MISMATCH_PARAMS, _DANGLE_PARAMS):
+            for grid in table.values():
+                for dh, ds in grid.values():
+                    assert math.isfinite(dh)
+                    assert math.isfinite(ds)
+
+
+class TestDefectDuplexPerfect:
+    def test_perfect_duplex_matches_calculate_dg(self):
+        aso = "ATGCAGTC"
+        result = calculate_defect_duplex(aso, _revcomp(aso))
+        assert result.defect == "none"
+        assert result.aso_position == -1
+        assert result.target_position == -1
+        assert result.dh == calculate_nn_thermodynamics(aso)[0]
+        assert result.ds == calculate_nn_thermodynamics(aso)[1]
+        assert result.dg == calculate_dg(aso)
+
+    def test_nn_duplex_params_agrees_with_nn_function(self):
+        """_nn_duplex_params (no symmetry) equals the NN function for a
+        non-self-complementary sequence."""
+        seq = "ATGCAGTC"  # not palindromic
+        assert _nn_duplex_params(seq) == calculate_nn_thermodynamics(seq)
+
+    def test_u_converted_to_t(self):
+        """RNA-style U input is converted to T on both strands."""
+        result = calculate_defect_duplex("AUGCA", "UGCAU")
+        assert result.defect == "none"
+        assert result.aso_sequence == "ATGCA"
+
+
+class TestDefectDuplexTerminalMismatch:
+    def test_three_prime_worked_example_composition(self):
+        """5'-AGCGCTG / 3'-TCGCGAA (the NNDB worked example): the result
+        must equal the WC-helix baseline plus the published terminal-
+        mismatch term (dG37 -0.6, dH +2.3 at closing T.A with motif G.A)."""
+        result = calculate_defect_duplex("AGCGCTG", "AAGCGCT")
+        assert result.defect == "terminal_mismatch"
+        assert result.aso_position == 6
+        assert result.target_position == 0
+        base_h, base_s = _nn_duplex_params("AGCGCT")
+        term_h, term_s = _TERMINAL_MISMATCH_PARAMS["TA"]["GA"]
+        assert result.dh == pytest.approx(base_h + term_h)
+        assert result.ds == pytest.approx(base_s + term_s)
+        assert result.dg == pytest.approx(_dg37(base_h + term_h, base_s + term_s))
+
+    def test_five_prime_terminal_mismatch_uses_rotated_lookup(self):
+        """A 5'-terminal mismatch is evaluated with the mismatched base on
+        the top strand of the rotated frame."""
+        aso = "TGCGCAA"
+        site = list(_revcomp(aso))
+        site[-1] = "C"  # site[-1] pairs aso[0]=T; C makes T·C mismatch
+        site = "".join(site)
+        result = calculate_defect_duplex(aso, site)
+        assert result.defect == "terminal_mismatch"
+        assert result.aso_position == 0
+        assert result.target_position == len(aso) - 1
+        # rotated closing pair (top=under[1], bottom=aso[1]) and motif
+        # (top=under[0], bottom=aso[0])
+        under = [site[len(aso) - 1 - i] for i in range(len(aso))]
+        term_h, term_s = _TERMINAL_MISMATCH_PARAMS[f"{under[1]}{aso[1]}"][f"{under[0]}{aso[0]}"]
+        base_h, base_s = _nn_duplex_params(aso[1:])
+        assert result.dh == pytest.approx(base_h + term_h)
+        assert result.ds == pytest.approx(base_s + term_s)
+
+    def test_wobble_closing_terminal_mismatch(self):
+        """A terminal mismatch next to a G.T-wobble penultimate pair is
+        tabulated (blocks GT/TG)."""
+        aso = "AGCGCTG"
+        site = list(_revcomp(aso))
+        # site[0] pairs aso[-1]=G; force a wobble penultimate pair by making
+        # site[1] (pairs aso[-2]=T) a G -> pair T·G wobble
+        site[1] = "G"
+        site[0] = "A"  # terminal mismatch A against G (A·G)
+        site = "".join(site)
+        result = calculate_defect_duplex(aso, site)
+        assert result.defect == "terminal_mismatch"
+        term_h, term_s = _TERMINAL_MISMATCH_PARAMS["TG"]["GA"]
+        base_h, base_s = _nn_duplex_params(aso[: len(aso) - 1])
+        assert result.dh == pytest.approx(base_h + term_h)
+
+
+class TestDefectDuplexInternalMismatch:
+    def test_internal_mismatch_replaces_two_stacks(self):
+        aso = "ATGCCGA"
+        site = list(_revcomp(aso))
+        site[3] = "A"  # pairs aso[3]=C: C·A internal mismatch
+        site = "".join(site)
+        result = calculate_defect_duplex(aso, site)
+        assert result.defect == "internal_mismatch"
+        assert result.aso_position == 3
+        assert result.target_position == 3
+        under = [site[len(aso) - 1 - i] for i in range(len(aso))]
+        block = f"{aso[2]}{under[2]}/{aso[4]}{under[4]}"
+        motif = f"{aso[3]}{under[3]}"
+        dh_defect, ds_defect = _INT11_PARAMS[block][motif]
+        h1, s1 = _DNA_NN[aso[2:4]]
+        h2, s2 = _DNA_NN[aso[3:5]]
+        base_h, base_s = _nn_duplex_params(aso)
+        assert result.dh == pytest.approx(base_h - h1 - h2 + dh_defect)
+        assert result.ds == pytest.approx(base_s - s1 - s2 + ds_defect)
+
+    def test_internal_mismatch_temperature_dependence(self):
+        """The same duplex at a different temperature only changes dG."""
+        aso = "ATGCCGA"
+        site = list(_revcomp(aso))
+        site[3] = "A"
+        site = "".join(site)
+        r37 = calculate_defect_duplex(aso, site, temperature=37.0)
+        r50 = calculate_defect_duplex(aso, site, temperature=50.0)
+        assert r50.dh == r37.dh
+        assert r50.ds == r37.ds
+        assert r50.dg > r37.dg
+
+    def test_mismatch_adjacent_to_mismatch_rejected(self):
+        """Two adjacent mismatches (a 1x2 motif) are out of the tabulated
+        domain."""
+        aso = "ATGCCGA"
+        site = list(_revcomp(aso))
+        site[2] = "A"  # pairs aso[4]=C
+        site[3] = "A"  # pairs aso[3]=C
+        site = "".join(site)
+        with pytest.raises(ThermodynamicsError, match="mismatches"):
+            calculate_defect_duplex(aso, site)
+
+    def test_wobble_flanked_internal_mismatch(self):
+        """An internal mismatch flanked by a G.T wobble pair uses the
+        wobble-closure blocks."""
+        aso = "AGCGCTA"
+        site = list(_revcomp(aso))  # T A G C G C T
+        site[5] = "T"  # pairs aso[1]=G -> G·T wobble closing pair
+        site[4] = "A"  # pairs aso[2]=C -> C·A internal mismatch
+        site = "".join(site)
+        result = calculate_defect_duplex(aso, site)
+        assert result.defect == "internal_mismatch"
+        under = [site[len(aso) - 1 - i] for i in range(len(aso))]
+        assert (aso[1], under[1]) == ("G", "T")
+        block = f"{aso[1]}{under[1]}/{aso[3]}{under[3]}"
+        motif = f"{aso[2]}{under[2]}"
+        dh_defect, ds_defect = _INT11_PARAMS[block][motif]
+        h1, s1 = _DNA_NN[aso[1:3]]
+        h2, s2 = _DNA_NN[aso[2:4]]
+        base_h, base_s = _nn_duplex_params(aso)
+        assert result.dh == pytest.approx(base_h - h1 - h2 + dh_defect)
+
+
+class TestDefectDuplexDanglingEnd:
+    def test_three_prime_overhang(self):
+        """A target 3' overhang is a bottom-3' dangle, evaluated in the
+        rotated frame via the top_3p table."""
+        aso = "GCACG"
+        site = _revcomp(aso) + "A"
+        result = calculate_defect_duplex(aso, site)
+        assert result.defect == "dangling_end"
+        assert result.aso_position == 0
+        assert result.target_position == 5
+        closing = f"{site[4]}{aso[0]}"
+        dh_defect, ds_defect = _DANGLE_PARAMS[f"{closing}|top_3p"]["A"]
+        base_h, base_s = _nn_duplex_params(aso)
+        assert result.dh == pytest.approx(base_h + dh_defect)
+        assert result.ds == pytest.approx(base_s + ds_defect)
+
+    def test_five_prime_overhang(self):
+        """A target 5' overhang is a bottom-5' dangle, direct lookup."""
+        aso = "GCACG"
+        site = "G" + _revcomp(aso)
+        result = calculate_defect_duplex(aso, site)
+        assert result.defect == "dangling_end"
+        assert result.aso_position == 4
+        assert result.target_position == 0
+        closing = f"{aso[-1]}{site[1]}"
+        dh_defect, ds_defect = _DANGLE_PARAMS[f"{closing}|bottom_5p"]["G"]
+        base_h, base_s = _nn_duplex_params(aso)
+        assert result.dh == pytest.approx(base_h + dh_defect)
+        assert result.ds == pytest.approx(base_s + ds_defect)
+
+    def test_ambiguous_overhang_rejected(self):
+        """For a homopolymeric ASO (T·A pairs) both overhang alignments
+        pair perfectly; the function refuses to guess."""
+        with pytest.raises(ThermodynamicsError, match="Ambiguous"):
+            calculate_defect_duplex("TTT", "AAAA")
+
+    def test_imperfect_aligned_region_rejected(self):
+        """A dangling end over a region containing a true mismatch is out
+        of scope (that would be two defects)."""
+        aso = "ATGCAGTC"
+        site = list(_revcomp(aso))
+        site[2] = "A"  # mismatch inside the aligned region
+        with pytest.raises(ThermodynamicsError, match="align"):
+            calculate_defect_duplex(aso, "".join(site) + "T")
+
+
+class TestDefectDuplexValidation:
+    def test_target_length_neither_n_nor_n_plus_1(self):
+        with pytest.raises(ThermodynamicsError, match="exceed it by one"):
+            calculate_defect_duplex("ATGCAGTC", "GACTGCAT" + "TC")
+
+    def test_too_short_aso(self):
+        with pytest.raises(ThermodynamicsError, match="too short"):
+            calculate_defect_duplex("AT", "AT")
+
+    def test_invalid_base_rejected(self):
+        with pytest.raises(ThermodynamicsError, match="Invalid base"):
+            calculate_defect_duplex("ATGCNGTC", "GACTGCAT")
+
+    def test_result_is_frozen(self):
+        result = calculate_defect_duplex("ATGCAGTC", "GACTGCAT")
+        with pytest.raises(AttributeError):
+            result.dg = 0.0

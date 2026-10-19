@@ -17,6 +17,8 @@ from aso_designer.config_schema import ASOConfig
 from aso_designer.motifs import MotifReport, assess_motifs
 from aso_designer.pipeline import ASOPipeline, PipelineConfig
 from aso_designer.thermodynamics import (
+    DefectDuplexResult,
+    calculate_defect_duplex,
     reset_chemistry_presets_cache,
     set_thermodynamics_cache,
 )
@@ -30,9 +32,11 @@ __all__ = [
     "ASOCandidate",
     "ASOPipeline",
     "ChemistryDesign",
+    "DefectDuplexResult",
     "MotifReport",
     "PipelineConfig",
     "assess_motifs",
+    "calculate_defect_duplex",
     "create_chemistry_design",
     "load_config",
     "reset_chemistry_presets_cache",
