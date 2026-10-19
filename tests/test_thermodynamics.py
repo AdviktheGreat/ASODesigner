@@ -4,7 +4,9 @@ import math
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
+from aso_designer.config_schema import ASOConfig
 from aso_designer.thermodynamics import (
     _HYBRID_INIT,
     _HYBRID_NN,
@@ -19,6 +21,7 @@ from aso_designer.thermodynamics import (
     calculate_duplex_dg,
     calculate_duplex_dg_nn,
     calculate_duplex_dg_rnaduplex,
+    calculate_mg_correction,
     calculate_net_binding_dg,
     calculate_nn_thermodynamics,
     calculate_self_structure_dg,
@@ -411,6 +414,94 @@ class TestCalculateTm:
         # Both should produce valid Tm values
         assert isinstance(tm_sc, float)
         assert isinstance(tm_ns, float)
+
+
+class TestMgCorrection:
+    """Owczarzy 2008 divalent-ion correction (method 7)."""
+
+    def test_zero_mg_is_noop(self):
+        assert calculate_mg_correction("ATGC", na_conc=0.1) == 0.0
+
+    def test_requires_monovalent_background(self):
+        with pytest.raises(ThermodynamicsError, match="monovalent"):
+            calculate_mg_correction("ATGC", na_conc=0.0, mg_conc=0.0015)
+
+    @pytest.mark.parametrize(
+        ("na_m", "mg_m", "dntp_m"),
+        [
+            (0.05, 0.0015, 0.0),  # mid regime (0.22 <= R < 6)
+            (0.05, 1.0e-6, 0.0),  # R < 0.22 → Owczarzy 2004 monovalent branch
+            (1.0e-5, 0.001, 0.0),  # R >= 6 → Mg2+-dominated branch
+            (0.05, 0.0015, 0.002),  # dNTPs chelate most of the Mg2+
+            (0.1, 0.003, 0.001),  # excess Mg2+ over dNTPs
+        ],
+    )
+    def test_matches_biopython_reference(self, na_m, mg_m, dntp_m):
+        """Exact cross-validation against Biopython's salt_correction
+        (method 7 — the reference implementation of Owczarzy 2008).
+        Biopython takes millimolar concentrations; we take molar."""
+        from Bio.SeqUtils.MeltingTemp import salt_correction as bp_salt
+
+        seq = "ATGCATGCATGCATGCATGC"
+        corr_ours = calculate_mg_correction(seq, na_conc=na_m, mg_conc=mg_m, dntp_conc=dntp_m)
+        corr_bp = bp_salt(
+            Na=na_m * 1000.0,
+            Mg=mg_m * 1000.0,
+            dNTPs=dntp_m * 1000.0,
+            method=7,
+            seq=seq,
+        )
+        assert corr_ours == pytest.approx(corr_bp, rel=1e-9, abs=1e-15)
+
+    def test_tm_with_mg_applies_correction(self):
+        """With Mg2+, Tm = 1/(1/Tm_1M + corr) − 273.15 (no ΔS correction)."""
+        seq = "ATGCATGCATGCATGC"
+        dh, ds = calculate_nn_thermodynamics(seq)
+        tm_1m = (dh * 1000) / (ds + R * math.log(1e-6 / 4)) - 273.15
+        corr = calculate_mg_correction(seq, na_conc=0.05, mg_conc=0.0015)
+        expected = 1.0 / (1.0 / (tm_1m + 273.15) + corr) - 273.15
+        got = calculate_tm(seq, na_conc=0.05, oligo_conc=1e-6, mg_conc=0.0015)
+        assert got == pytest.approx(expected)
+
+    def test_mg_corrects_away_from_standard_state(self):
+        """Physiological Mg2+ + modest monovalent lowers the Tm below the
+        1 M standard-state value."""
+        seq = "ATGCATGCATGCATGC"
+        dh, ds = calculate_nn_thermodynamics(seq)
+        tm_1m = (dh * 1000) / (ds + R * math.log(1e-6 / 4)) - 273.15
+        tm_mg = calculate_tm(seq, na_conc=0.05, oligo_conc=1e-6, mg_conc=0.0015)
+        assert tm_mg < tm_1m
+
+    def test_mg_correction_ignores_salt_correction_method(self):
+        """When Mg2+ is present, salt_correction choice must not matter."""
+        seq = "ATGCATGCATGCATGC"
+        a = calculate_tm(seq, na_conc=0.05, mg_conc=0.0015, salt_correction="santalucia")
+        b = calculate_tm(seq, na_conc=0.05, mg_conc=0.0015, salt_correction="log10")
+        assert a == pytest.approx(b)
+
+
+class TestMgConfig:
+    """Config plumbing for the Mg2+ correction."""
+
+    def test_schema_defaults(self):
+        cfg = ASOConfig()
+        assert cfg.thermodynamics.mg_conc == 0.0
+        assert cfg.thermodynamics.dntp_conc == 0.0
+
+    def test_schema_rejects_negative(self):
+        with pytest.raises(ValidationError):
+            ASOConfig(thermodynamics={"mg_conc": -0.001})
+        with pytest.raises(ValidationError):
+            ASOConfig(thermodynamics={"dntp_conc": -0.001})
+
+    def test_summary_threads_mg_conc(self):
+        summary = compute_thermodynamic_summary(
+            "ATGCATGCATGCATGC", chemistry="gapmer", na_conc=0.05, mg_conc=0.0015
+        )
+        expected_tm = calculate_tm_with_chemistry(
+            "ATGCATGCATGCATGC", chemistry="gapmer", na_conc=0.05, mg_conc=0.0015
+        )
+        assert summary.tm == pytest.approx(expected_tm)
 
 
 # ---------------------------------------------------------------------------

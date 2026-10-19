@@ -481,6 +481,8 @@ class ASOPipeline:
                 chemistry=candidate.chemistry,
                 na_conc=t_cfg.na_conc,
                 oligo_conc=t_cfg.oligo_conc,
+                mg_conc=t_cfg.mg_conc,
+                dntp_conc=t_cfg.dntp_conc,
                 tm_optimal=t_cfg.tm_optimal,
                 tm_min=t_cfg.tm_min,
                 tm_max=t_cfg.tm_max,

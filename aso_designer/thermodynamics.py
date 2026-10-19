@@ -428,6 +428,108 @@ def calculate_nn_thermodynamics(
 
 
 # ---------------------------------------------------------------------------
+# Divalent-ion (Mg2+) salt correction
+# Owczarzy et al. (2008) Biochemistry 47:5336-5353, method 7: a correction
+# added to 1/Tm (Kelvin) that accounts for both Mg2+ and the monovalent
+# background. Cross-validated against the reference implementation in
+# Biopython's Bio.SeqUtils.MeltingTemp.salt_correction (method 7).
+# ---------------------------------------------------------------------------
+
+# Mg:dNTP dissociation constant (M^-1) used to compute free Mg2+ when dNTPs
+# are present (Owczarzy 2008).
+_MG_DNTP_KA = 3.0e4
+
+
+def calculate_mg_correction(
+    sequence: str,
+    na_conc: float,
+    mg_conc: float = 0.0,
+    dntp_conc: float = 0.0,
+) -> float:
+    """Compute the Owczarzy 2008 divalent-ion correction for 1/Tm.
+
+    The returned term ``corr`` is added to ``1/Tm`` with Tm in Kelvin:
+
+        Tm(corrected) = 1 / (1 / Tm(1 M standard state) + corr)
+
+    The correction replaces (not supplements) the monovalent ΔS salt
+    correction: its low-Mg branch is the Owczarzy 2004 monovalent
+    formula, and the Mg branches fold the monovalent background into
+    the empirical coefficients via the sqrt([Mg2+])/[monovalent] ratio.
+
+    Parameters
+    ----------
+    sequence : str
+        Oligonucleotide sequence (DNA alphabet); used for the GC
+        fraction and length terms.
+    na_conc : float
+        Total monovalent cation concentration in M (Na+ + K+ + Tris/2).
+        Must be > 0.
+    mg_conc : float
+        Total magnesium concentration in M (0 disables the correction).
+    dntp_conc : float
+        Total dNTP concentration in M. dNTPs chelate Mg2+; free Mg2+ is
+        computed with a 1:1 binding model (Ka = 3e4 M^-1). When dNTPs
+        overwhelm Mg2+, free Mg2+ becomes negligible and the correction
+        reduces to the monovalent (2004) branch.
+
+    Returns
+    -------
+    float
+        Correction term in K^-1 (0.0 when ``mg_conc`` <= 0).
+
+    Raises
+    ------
+    ThermodynamicsError
+        If ``na_conc`` is not positive when Mg2+ is present.
+    """
+    import math
+
+    if mg_conc <= 0:
+        return 0.0
+    if na_conc <= 0:
+        raise ThermodynamicsError(
+            "na_conc must be > 0 when Mg2+ is present (Owczarzy correction "
+            "requires a monovalent background)"
+        )
+
+    seq = sequence.upper()
+    gc_fraction = (seq.count("G") + seq.count("C")) / len(seq)
+    mon = na_conc  # M
+    mg = mg_conc  # M
+
+    if dntp_conc > 0:
+        # Free Mg2+ after dNTP chelation (quadratic solution of the
+        # 1:1 binding equilibrium).
+        x = _MG_DNTP_KA * dntp_conc - _MG_DNTP_KA * mg + 1.0
+        mg = (-x + math.sqrt(x * x + 4.0 * _MG_DNTP_KA * mg)) / (2.0 * _MG_DNTP_KA)
+
+    # Decision tree on R = sqrt([free Mg2+]) / [monovalent]
+    ratio = math.sqrt(mg) / mon
+    if ratio < 0.22:
+        # Monovalent-dominated regime: Owczarzy 2004 monovalent formula
+        # (Biochemistry 43:3537-3554).
+        return (4.29 * gc_fraction - 3.95) * 1e-5 * math.log(mon) + 9.40e-6 * math.log(mon) ** 2
+
+    a, b, c, d = 3.92, -0.911, 6.26, 1.42
+    e, f, g = -48.2, 52.5, 8.31
+    if ratio < 6.0:
+        # Intermediate regime: monovalent-adjusted coefficients.
+        a = 3.92 * (0.843 - 0.352 * math.sqrt(mon) * math.log(mon))
+        d = 1.42 * (1.279 - 4.03e-3 * math.log(mon) - 8.03e-3 * math.log(mon) ** 2)
+        g = 8.31 * (0.486 - 0.258 * math.log(mon) + 5.25e-3 * math.log(mon) ** 3)
+    # Else (ratio >= 6.0): Mg2+-dominated regime with the default coefficients.
+
+    corr = (
+        a
+        + b * math.log(mg)
+        + gc_fraction * (c + d * math.log(mg))
+        + (1.0 / (2.0 * (len(seq) - 1))) * (e + f * math.log(mg) + g * math.log(mg) ** 2)
+    ) * 1e-5
+    return corr
+
+
+# ---------------------------------------------------------------------------
 # Melting temperature (Tm) calculation
 # ---------------------------------------------------------------------------
 
@@ -439,6 +541,8 @@ def calculate_tm(
     rna: bool = False,
     salt_correction: str = "santalucia",
     hybrid: bool = False,
+    mg_conc: float = 0.0,
+    dntp_conc: float = 0.0,
 ) -> float:
     """Calculate the melting temperature (Tm) using the NN model.
 
@@ -456,16 +560,25 @@ def calculate_tm(
     sequence : str
         Oligonucleotide sequence (DNA or RNA alphabet).
     na_conc : float
-        Sodium concentration in M (default 0.1 M = 100 mM).
+        Sodium concentration in M (default 0.1 M = 100 mM). When Mg2+
+        is present this is the total monovalent background
+        (Na+ + K+ + Tris/2).
     oligo_conc : float
         Total oligo strand concentration in M (default 1 µM).
     rna : bool
         If True, use RNA/RNA NN parameters.
     salt_correction : str
         Salt correction method: "santalucia" (1998) or "log10" (simple).
+        Ignored when ``mg_conc`` > 0 (the Owczarzy 2008 correction
+        handles monovalent + divalent ions together).
     hybrid : bool
         If True, use RNA/DNA hybrid NN parameters. The concentration
         factor x is 4 (hybrid duplexes are never self-complementary).
+    mg_conc : float
+        Magnesium concentration in M (0 disables Mg2+ correction).
+    dntp_conc : float
+        dNTP concentration in M (chelates Mg2+; see
+        ``calculate_mg_correction``).
 
     Returns
     -------
@@ -504,6 +617,13 @@ def calculate_tm(
         raise ThermodynamicsError("Denominator is zero in Tm calculation")
 
     tm_1m = (dh * 1000) / denominator - 273.15
+
+    # Mg2+ present: the Owczarzy 2008 correction replaces the monovalent
+    # salt corrections entirely (it corrects 1/Tm from the 1 M standard
+    # state and folds the monovalent background into its own branches).
+    if mg_conc > 0:
+        corr = calculate_mg_correction(seq, na_conc, mg_conc, dntp_conc)
+        return 1.0 / (1.0 / (tm_1m + 273.15) + corr) - 273.15
 
     # Apply salt correction
     if salt_correction == "santalucia":
@@ -602,6 +722,8 @@ def calculate_tm_with_chemistry(
     chemistry: str = "gapmer",
     na_conc: float = 0.1,
     oligo_conc: float = 1.0e-6,
+    mg_conc: float = 0.0,
+    dntp_conc: float = 0.0,
 ) -> float:
     """Calculate Tm with chemistry-specific NN parameters and adjustment.
 
@@ -624,6 +746,10 @@ def calculate_tm_with_chemistry(
         Sodium concentration in M (default 0.1).
     oligo_conc : float
         Oligo concentration in M (default 1 µM).
+    mg_conc : float
+        Magnesium concentration in M (0 disables Mg2+ correction).
+    dntp_conc : float
+        dNTP concentration in M (chelates Mg2+).
 
     Returns
     -------
@@ -638,6 +764,8 @@ def calculate_tm_with_chemistry(
         oligo_conc=oligo_conc,
         rna=use_rna,
         hybrid=use_hybrid,
+        mg_conc=mg_conc,
+        dntp_conc=dntp_conc,
     )
     adjustment = get_chemistry_tm_adjustment(chemistry)
     adjusted_tm = base_tm + adjustment
@@ -1372,6 +1500,8 @@ def compute_thermodynamic_summary(
     chemistry: str = "gapmer",
     na_conc: float = 0.1,
     oligo_conc: float = 1.0e-6,
+    mg_conc: float = 0.0,
+    dntp_conc: float = 0.0,
     tm_optimal: float = 52.0,
     tm_min: float = 40.0,
     tm_max: float = 65.0,
@@ -1398,6 +1528,10 @@ def compute_thermodynamic_summary(
         Sodium concentration in M (default 0.1).
     oligo_conc : float
         Oligo concentration in M (default 1 µM).
+    mg_conc : float
+        Magnesium concentration in M (0 disables Mg2+ correction).
+    dntp_conc : float
+        dNTP concentration in M (chelates Mg2+).
     tm_optimal : float
         Optimal Tm in °C (default 52.0).
     tm_min : float
@@ -1422,7 +1556,12 @@ def compute_thermodynamic_summary(
     """
     # Tm
     tm = calculate_tm_with_chemistry(
-        aso_sequence, chemistry=chemistry, na_conc=na_conc, oligo_conc=oligo_conc
+        aso_sequence,
+        chemistry=chemistry,
+        na_conc=na_conc,
+        oligo_conc=oligo_conc,
+        mg_conc=mg_conc,
+        dntp_conc=dntp_conc,
     )
     tm_score = score_tm(tm, tm_optimal=tm_optimal, tm_min=tm_min, tm_max=tm_max)
 

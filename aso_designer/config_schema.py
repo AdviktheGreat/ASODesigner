@@ -125,6 +125,23 @@ class ThermodynamicsConfig(BaseModel):
     tm_optimal: float = Field(default=52.0, ge=20.0, le=100.0)
     na_conc: float = Field(default=0.1, gt=0.0, description="Sodium concentration (M).")
     oligo_conc: float = Field(default=1.0e-6, gt=0.0, description="Oligo concentration (M).")
+    mg_conc: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Magnesium concentration (M). When > 0, Tm uses the Owczarzy 2008 "
+            "divalent-ion correction (which replaces the monovalent-only "
+            "SantaLucia correction)."
+        ),
+    )
+    dntp_conc: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "dNTP concentration (M). dNTPs chelate Mg2+; free Mg2+ is used "
+            "in the Owczarzy 2008 correction."
+        ),
+    )
     self_structure_max: float = Field(default=-3.0, description="Max self-structure ΔG (kcal/mol).")
     self_structure_nn_fraction: confloat(gt=0.0, le=1.0) = Field(
         default=0.3,

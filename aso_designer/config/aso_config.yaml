@@ -104,6 +104,15 @@ thermodynamics:
   # Oligo concentration (M) for Tm calculation.
   oligo_conc: 1.0e-6
 
+  # Magnesium concentration (M). When > 0, Tm uses the Owczarzy 2008
+  # divalent-ion correction (replacing the monovalent-only correction).
+  # 0 disables the Mg2+ correction.
+  mg_conc: 0.0
+
+  # dNTP concentration (M). dNTPs chelate Mg2+; the free Mg2+ fraction is
+  # used in the Owczarzy correction. Only meaningful when mg_conc > 0.
+  dntp_conc: 0.0
+
   # Maximum allowed self-structure ΔG (kcal/mol).
   # Candidates with ΔG self below this (more negative) are penalized.
   self_structure_max: -3.0
